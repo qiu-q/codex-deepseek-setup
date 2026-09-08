@@ -23,11 +23,13 @@
                 <Border Background="White" CornerRadius="10" Padding="20" Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock Text="1  检查并安装 Codex" FontSize="19" FontWeight="SemiBold" />
-                        <TextBlock Text="支持 Windows 10 22H2（19045）和 Windows 11 x64。将从 OpenAI 官方地址下载并校验签名。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#475569" />
+                        <TextBlock Text="推荐 Windows 10 22H2（19045）或 Windows 11 x64。19041—19044 可继续尝试官方离线部署。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#475569" />
                         <StackPanel Orientation="Horizontal">
                             <Button Content="检查电脑" Click="CheckButton_Click" />
                             <Button Content="下载并安装" Click="InstallButton_Click" Background="#2563EB" Foreground="White" />
+                            <Button Content="实验性解包运行" Click="PortableInstallButton_Click" IsEnabled="{Binding CanUsePortable, Mode=OneWay}" ToolTip="仅在官方离线部署失败时使用；不重新签名或封包" />
                         </StackPanel>
+                        <TextBlock Text="实验模式只解压通过官方签名和包身份校验的 MSIX，可能缺少更新、通知、协议关联或沙盒能力。" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#B45309" />
                         <ProgressBar Height="7" Margin="0,14,0,0" Minimum="0" Maximum="100" Value="{Binding Progress, Mode=OneWay}" />
                     </StackPanel>
                 </Border>

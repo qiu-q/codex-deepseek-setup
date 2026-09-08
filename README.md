@@ -1,12 +1,13 @@
 # Codex + DeepSeek Windows 安装助手
 
-这是一个中文 WPF 安装向导，目标是让 Windows 10 22H2 / Windows 11 x64 用户使用官方 Codex 桌面应用，并通过 DeepSeek 官方 API 使用模型。
+这是一个中文 WPF 安装向导，目标是让 Windows 10 / Windows 11 x64 用户使用官方 Codex 桌面应用，并通过 DeepSeek 官方 API 使用模型。推荐 Windows 10 22H2（19045）或更新版本；19041—19044 可使用兼容尝试。
 
 它会：
 
 - 从 OpenAI 固定官方地址下载 `ChatGPT-x64.msix` 和离线许可证；
 - 校验 MSIX 包身份、架构、内部签名文件以及 Windows Authenticode 状态；
 - 经 UAC 授权调用 Windows AppX 部署命令；
+- 官方离线部署失败时，可由用户明确选择实验性解包运行；
 - 引导用户自行前往 DeepSeek 官方网站注册、实名认证、充值并创建 API Key；
 - 调用 DeepSeek 官方接口验证 Key 和模型；
 - 把 Key 保存到当前用户的 Windows 凭据管理器；
@@ -24,7 +25,7 @@ CodexDeepSeekSetup.exe
 CodexDeepSeekSetup.Helper.exe
 ```
 
-双击 `CodexDeepSeekSetup.exe`，按界面中的 1、2、3 顺序执行。安装阶段会出现一次 Windows UAC 确认框。
+双击 `CodexDeepSeekSetup.exe`，优先选择“下载并安装”。只有官方离线部署失败时才选择“实验性解包运行”。正式安装阶段会出现一次 Windows UAC 确认框，实验模式不注册 MSIX。
 
 配置前请在 [DeepSeek 开放平台](https://platform.deepseek.com/)完成账户准备，并在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建密钥。实名认证资料只应填写在 DeepSeek 官方页面。
 
@@ -51,7 +52,8 @@ powershell -ExecutionPolicy Bypass -File .\build\Publish-Internal.ps1
 - 下载主机被限制为 `persistent.oaistatic.com`，DeepSeek API 固定为 `https://api.deepseek.com/`。
 - 提权助手只接受受限命令；它会在管理员上下文再次验证 MSIX。
 - API Key 不进入 TOML、JSON、命令行参数、日志或构建产物。
-- 官方 MSIX 不解包运行、不重签名、不重新封包。
+- 正式路径不解包运行；实验路径只解压通过官方签名和包身份校验的 MSIX，始终不重签名、不重新封包。
+- 实验路径可能缺少自动更新、通知、协议关联或部分沙盒能力，不属于 OpenAI 官方支持的独立 EXE 安装方式。
 
 ## 当前验证状态
 

@@ -16,6 +16,7 @@ public interface IWizardActions
     bool IsCodexInstalled { get; }
     Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> InstallAsync(IProgress<double>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> InstallPortableAsync(IProgress<double>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken);
 }
@@ -25,6 +26,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private WizardStep currentStep = WizardStep.Welcome;
     private string statusMessage = "准备检查这台电脑";
     private bool isBusy;
+    private bool canUsePortable;
     private double progress;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -45,6 +47,12 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     {
         get => isBusy;
         private set => Set(ref isBusy, value);
+    }
+
+    public bool CanUsePortable
+    {
+        get => canUsePortable;
+        private set => Set(ref canUsePortable, value);
     }
 
     public double Progress
@@ -79,6 +87,35 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             cancellationToken);
         if (result.IsSuccess)
         {
+            CurrentStep = WizardStep.DeepSeek;
+        }
+        else
+        {
+            CanUsePortable = true;
+        }
+        return result;
+    }
+
+    public async Task<OperationResult<Unit>> InstallPortableAsync(CancellationToken cancellationToken)
+    {
+        if (!CanUsePortable)
+        {
+            return OperationResult<Unit>.Failure("wizard.portable.requires_primary_failure", "请先尝试“下载并安装”；失败后才能使用实验模式。");
+        }
+        if (CurrentStep != WizardStep.Welcome)
+        {
+            return OperationResult<Unit>.Failure("wizard.order", "当前步骤不能安装。");
+        }
+
+        var progressReporter = new Progress<double>(value => Progress = value);
+        var result = await RunAsync(
+            "正在校验并解包官方 Codex（实验模式）…",
+            "实验性 Codex 目录已生成，请创建并填写 DeepSeek API Key",
+            token => actions.InstallPortableAsync(progressReporter, token),
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            CanUsePortable = false;
             CurrentStep = WizardStep.DeepSeek;
         }
         return result;

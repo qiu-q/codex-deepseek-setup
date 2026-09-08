@@ -66,7 +66,7 @@ public sealed class WindowsReadinessService(IProcessRunner processRunner) : IWin
             var version = root.GetProperty("Version").GetString() ?? string.Empty;
             var build = root.GetProperty("Build").GetString() ?? "0";
             var supported = root.GetProperty("IsX64").GetBoolean() &&
-                int.TryParse(build, out var buildNumber) && buildNumber >= 19045;
+                int.TryParse(build, out var buildNumber) && buildNumber >= 19041;
             var sid = root.GetProperty("UserSid").GetString() ?? string.Empty;
             var report = new WindowsReadinessReport(
                 root.GetProperty("ProductName").GetString() ?? "Windows",

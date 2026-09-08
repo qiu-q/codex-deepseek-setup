@@ -37,6 +37,20 @@ public partial class MainWindow : Window
     private async void InstallButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.InstallAsync(lifetime.Token));
 
+    private async void PortableInstallButton_Click(object sender, RoutedEventArgs e)
+    {
+        var confirmed = MessageBox.Show(
+            this,
+            "实验模式不会注册 MSIX 包，只会校验并解压官方文件。自动更新、通知、协议关联和部分沙盒功能可能不可用。继续吗？",
+            "实验性解包运行",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmed == MessageBoxResult.Yes)
+        {
+            await RunUiAsync(() => viewModel.InstallPortableAsync(lifetime.Token));
+        }
+    }
+
     private async void ConfigureButton_Click(object sender, RoutedEventArgs e)
     {
         var key = ApiKeyBox.Password;

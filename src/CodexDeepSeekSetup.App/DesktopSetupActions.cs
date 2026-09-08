@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using System.Runtime.Versioning;
+using System.Diagnostics;
 using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Configuration;
 using CodexDeepSeekSetup.Core.DeepSeek;
@@ -20,6 +21,7 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly OfficialDownloadService downloader;
     private readonly IWindowsReadinessService readiness;
     private readonly ICodexPackageManager packageManager;
+    private readonly PortableCodexInstaller portableInstaller;
     private readonly CodexCliBootstrapper cliBootstrapper;
     private readonly DeepSeekClient deepSeek;
     private readonly ISecretStore secretStore;
@@ -28,6 +30,7 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly string helperSourcePath;
     private readonly string helperPath;
     private CodexPayload? payload;
+    private PortableCodexInstall? portableInstall;
 
     public bool IsCodexInstalled { get; private set; }
 
@@ -36,6 +39,7 @@ public sealed class DesktopSetupActions : IWizardActions
         OfficialDownloadService downloader,
         IWindowsReadinessService readiness,
         ICodexPackageManager packageManager,
+        PortableCodexInstaller portableInstaller,
         CodexCliBootstrapper cliBootstrapper,
         DeepSeekClient deepSeek,
         ISecretStore secretStore,
@@ -48,6 +52,7 @@ public sealed class DesktopSetupActions : IWizardActions
         this.downloader = downloader;
         this.readiness = readiness;
         this.packageManager = packageManager;
+        this.portableInstaller = portableInstaller;
         this.cliBootstrapper = cliBootstrapper;
         this.deepSeek = deepSeek;
         this.secretStore = secretStore;
@@ -69,11 +74,12 @@ public sealed class DesktopSetupActions : IWizardActions
             "CodexDeepSeekSetup.Helper.exe");
         var requestDirectory = GetRequestDirectory();
         var elevatedExecutable = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前安装程序路径。");
-        return new DesktopSetupActions(
+        var actions = new DesktopSetupActions(
             flavor,
             new OfficialDownloadService(new HttpClient { Timeout = TimeSpan.FromMinutes(30) }, new OfficialOriginPolicy()),
             new WindowsReadinessService(runner),
             new CodexPackageManager(verifier, runner, elevatedExecutable, requestDirectory),
+            new PortableCodexInstaller(verifier, runner),
             new CodexCliBootstrapper(runner),
             new DeepSeekClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }),
             new WindowsCredentialStore(),
@@ -81,6 +87,11 @@ public sealed class DesktopSetupActions : IWizardActions
             runner,
             helperSource,
             helper);
+        var portableRoot = GetPortableRoot();
+        var persistedCli = Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User);
+        actions.portableInstall = PortableCodexInstaller.TryRecover(portableRoot, persistedCli);
+        actions.IsCodexInstalled = actions.portableInstall is not null;
+        return actions;
     }
 
     public static string GetRequestDirectory() => Path.Combine(
@@ -102,10 +113,14 @@ public sealed class DesktopSetupActions : IWizardActions
         }
 
         var report = result.Value!;
-        IsCodexInstalled = report.IsCodexInstalled;
+        if (report.IsCodexInstalled)
+        {
+            portableInstall = null;
+        }
+        IsCodexInstalled = report.IsCodexInstalled || portableInstall is not null;
         if (!report.IsSupported)
         {
-            return Failure("windows.unsupported", "需要 Windows 10 22H2（内部版本 19045）或更新的 x64 系统。");
+            return Failure("windows.unsupported", "需要 Windows 10 内部版本 19041 或更新的 x64 系统。");
         }
         if (report.EnableLua != 1)
         {
@@ -139,28 +154,12 @@ public sealed class DesktopSetupActions : IWizardActions
             return check;
         }
 
-        payload = FindAdjacentPayload();
-        if (payload is null)
+        var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
+        if (!preparedPayload.IsSuccess)
         {
-            var cache = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "CodexDeepSeekSetup",
-                "Downloads");
-            var downloadProgress = new Progress<DownloadProgress>(item =>
-            {
-                if (item.TotalBytes is > 0)
-                {
-                    progress?.Report(Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100));
-                }
-            });
-            var downloaded = await downloader.DownloadCodexPayloadAsync(cache, downloadProgress, cancellationToken)
-                .ConfigureAwait(false);
-            if (!downloaded.IsSuccess)
-            {
-                return Failure(downloaded.ErrorCode!, downloaded.ErrorMessage!);
-            }
-            payload = downloaded.Value!;
+            return Failure(preparedPayload.ErrorCode!, preparedPayload.ErrorMessage!);
         }
+        payload = preparedPayload.Value!;
 
         var installed = await packageManager.InstallAsync(payload.MsixPath, payload.LicensePath, cancellationToken)
             .ConfigureAwait(false);
@@ -183,6 +182,56 @@ public sealed class DesktopSetupActions : IWizardActions
         }
 
         IsCodexInstalled = true;
+        portableInstall = null;
+        return OperationResult<Unit>.Success(default);
+    }
+
+    public async Task<OperationResult<Unit>> InstallPortableAsync(
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Failure("windows.required", "此安装助手只能在 Windows 上运行。");
+        }
+
+        var readinessResult = await readiness.CheckAsync(cancellationToken).ConfigureAwait(false);
+        if (!readinessResult.IsSuccess)
+        {
+            return Failure(readinessResult.ErrorCode!, readinessResult.ErrorMessage!);
+        }
+        var report = readinessResult.Value!;
+        if (!report.IsSupported)
+        {
+            return Failure("windows.unsupported", "实验模式仍需要 Windows 10 内部版本 19041 或更新的 x64 系统。");
+        }
+        if (report.FreeSystemDriveBytes < 4L * 1024 * 1024 * 1024)
+        {
+            return Failure("windows.disk.low", "实验模式需要系统盘至少 4 GB 可用空间。");
+        }
+
+        var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
+        if (!preparedPayload.IsSuccess)
+        {
+            return Failure(preparedPayload.ErrorCode!, preparedPayload.ErrorMessage!);
+        }
+        payload = preparedPayload.Value!;
+
+        var destination = GetPortableRoot();
+        var installed = await portableInstaller.InstallAsync(
+            payload.MsixPath,
+            payload.LicensePath,
+            destination,
+            cancellationToken).ConfigureAwait(false);
+        if (!installed.IsSuccess)
+        {
+            return Failure(installed.ErrorCode!, installed.ErrorMessage!);
+        }
+
+        portableInstall = installed.Value!;
+        Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.User);
+        Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.Process);
+        IsCodexInstalled = true;
         return OperationResult<Unit>.Success(default);
     }
 
@@ -193,7 +242,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("wizard.order", "请先完成 Codex 安装。");
         }
 
-        var cli = await cliBootstrapper.PrepareAsync(cancellationToken).ConfigureAwait(false);
+        var cli = await PrepareCliAsync(cancellationToken).ConfigureAwait(false);
         if (!cli.IsSuccess)
         {
             return Failure(cli.ErrorCode!, cli.ErrorMessage!);
@@ -312,7 +361,93 @@ public sealed class DesktopSetupActions : IWizardActions
     }
 
     public Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken) =>
-        packageManager.LaunchAndVerifyAsync(cancellationToken);
+        portableInstall is null
+            ? packageManager.LaunchAndVerifyAsync(cancellationToken)
+            : LaunchPortableAsync(portableInstall, cancellationToken);
+
+    private async Task<OperationResult<CodexPayload>> PreparePayloadAsync(
+        IProgress<double>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (payload is not null)
+        {
+            return OperationResult<CodexPayload>.Success(payload);
+        }
+
+        var adjacent = FindAdjacentPayload();
+        if (adjacent is not null)
+        {
+            return OperationResult<CodexPayload>.Success(adjacent);
+        }
+
+        var cache = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CodexDeepSeekSetup",
+            "Downloads");
+        var downloadProgress = new Progress<DownloadProgress>(item =>
+        {
+            if (item.TotalBytes is > 0)
+            {
+                progress?.Report(Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100));
+            }
+        });
+        return await downloader.DownloadCodexPayloadAsync(cache, downloadProgress, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private Task<OperationResult<string>> PrepareCliAsync(CancellationToken cancellationToken)
+    {
+        if (portableInstall is not null && File.Exists(portableInstall.CliPath))
+        {
+            return Task.FromResult(OperationResult<string>.Success(portableInstall.CliPath));
+        }
+
+        return cliBootstrapper.PrepareAsync(cancellationToken);
+    }
+
+    private static async Task<OperationResult<Unit>> LaunchPortableAsync(
+        PortableCodexInstall install,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo(install.AppPath)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(install.AppPath)!
+            };
+            startInfo.Environment["CODEX_CLI_PATH"] = install.CliPath;
+            Process.Start(startInfo);
+
+            for (var attempt = 0; attempt < 15; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                var hasWindow = Process.GetProcessesByName("ChatGPT")
+                    .Concat(Process.GetProcessesByName("Codex"))
+                    .Any(process =>
+                    {
+                        using (process)
+                        {
+                            return process.MainWindowHandle != IntPtr.Zero;
+                        }
+                    });
+                if (hasWindow)
+                {
+                    return OperationResult<Unit>.Success(default);
+                }
+            }
+
+            return Failure("portable.launch.window.missing", "实验性 Codex 已启动，但没有检测到窗口。此模式可能不兼容当前官方包。");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return Failure("portable.launch.failed", "无法从实验性目录启动 Codex。");
+        }
+    }
 
     private CodexPayload? FindAdjacentPayload()
     {
@@ -326,6 +461,12 @@ public sealed class DesktopSetupActions : IWizardActions
         var license = Path.Combine(directory, "ChatGPT-License.xml");
         return File.Exists(msix) && File.Exists(license) ? new CodexPayload(msix, license) : null;
     }
+
+    private static string GetPortableRoot() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Programs",
+        "OpenAI",
+        "CodexPortable");
 
     private static OperationResult<Unit> Failure(string code, string message) =>
         OperationResult<Unit>.Failure(code, message);
