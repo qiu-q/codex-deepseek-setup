@@ -5,6 +5,8 @@
 它会：
 
 - 从 OpenAI 固定官方地址下载 `ChatGPT-x64.msix` 和离线许可证；
+- 把下载校验和系统安装拆成两个明确阶段，分别重试；
+- 显示当前文件、已下载/总大小、百分比、实时速度、预计剩余时间、总体进度和最多 200 条带时间记录；
 - 校验 MSIX 包身份、架构、内部签名文件以及 Windows Authenticode 状态；
 - 经 UAC 授权调用 Windows AppX 部署命令；
 - 官方离线部署失败时，可由用户明确选择实验性解包运行；
@@ -29,9 +31,12 @@ CodexDeepSeekSetup.Helper.exe
 
 双击 `CodexDeepSeekSetup.exe`，程序会自动检查电脑。按向导完成三步：
 
-1. 下载并安装 Codex。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。只有官方离线部署失败时才会显示“实验性解包运行”。
-2. 在 DeepSeek 官方平台准备 API Key，粘贴后点击“验证并配置 Codex”。
-3. 在完成页启动 Codex，或关闭安装助手。
+1. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
+2. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
+3. 在 DeepSeek 官方平台准备 API Key，粘贴后点击“验证并配置 Codex”。
+4. 在完成页启动 Codex，或关闭安装助手。
+
+下载区域会持续显示文件级进度与总体进度。展开“查看详细记录”可查看检查、下载、校验、授权、部署、注册、CLI 和保存状态等阶段；记录只包含运行状态，不包含 API Key。
 
 配置前请在 [DeepSeek 开放平台](https://platform.deepseek.com/)完成账户准备，并在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建密钥。实名认证资料只应填写在 DeepSeek 官方页面。
 
