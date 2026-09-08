@@ -13,6 +13,7 @@ public interface ICodexPackageManager
     Task<OperationResult<Unit>> InstallAsync(string msixPath, string licensePath, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> RegisterCurrentUserAsync(string msixPath, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAndVerifyAsync(CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> RemoveAsync(CancellationToken cancellationToken);
 }
 
 [SupportedOSPlatform("windows")]
@@ -152,6 +153,40 @@ public sealed class CodexPackageManager(
         catch
         {
             return OperationResult<Unit>.Failure("launch.failed", "无法启动 Codex，请从开始菜单手动打开 ChatGPT/Codex。");
+        }
+    }
+
+    public async Task<OperationResult<Unit>> RemoveAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(elevatedExecutablePath))
+        {
+            return OperationResult<Unit>.Failure("cleanup.elevation.missing", "无法定位安装助手，不能启动管理员清理。");
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo(elevatedExecutablePath)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = Path.GetDirectoryName(elevatedExecutablePath)!
+            };
+            startInfo.ArgumentList.Add("elevated");
+            startInfo.ArgumentList.Add("appx-remove");
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return OperationResult<Unit>.Failure("cleanup.elevation.failed", "无法启动管理员清理进程。");
+            }
+
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            return process.ExitCode == 0
+                ? OperationResult<Unit>.Success(default)
+                : OperationResult<Unit>.Failure("cleanup.appx.failed", $"Codex 系统包清理失败（退出码 {process.ExitCode}）。");
+        }
+        catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == 1223)
+        {
+            return OperationResult<Unit>.Failure("cleanup.elevation.cancelled", "已取消 Windows 管理员授权，尚未删除任何用户数据。");
         }
     }
 }

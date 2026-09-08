@@ -57,6 +57,29 @@ public sealed class RestrictedCommandRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_RoutesOnlyExactAppxRemoveCommand()
+    {
+        var output = new StringWriter();
+        var operations = new VisibleOperations();
+        var router = new RestrictedCommandRouter(operations, requestRoot);
+
+        var accepted = await router.ExecuteAsync(
+            ["elevated", "appx-remove"],
+            output,
+            TextWriter.Null,
+            default);
+        var rejected = await router.ExecuteAsync(
+            ["elevated", "appx-remove", "C:\\"],
+            output,
+            TextWriter.Null,
+            default);
+
+        Assert.Equal(0, accepted);
+        Assert.Equal(RestrictedCommandRouter.UsageError, rejected);
+        Assert.True(operations.RemoveCodexCalled);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsAppxRequestOutsideOwnedDirectory()
     {
         var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.json");
@@ -91,6 +114,8 @@ public sealed class RestrictedCommandRouterTests : IDisposable
 
     private sealed class VisibleOperations : IRestrictedOperations
     {
+        public bool RemoveCodexCalled { get; private set; }
+
         public Task<int> ReadCredentialAsync(string target, TextWriter output, TextWriter error, CancellationToken cancellationToken)
         {
             output.Write("credential-value");
@@ -100,6 +125,13 @@ public sealed class RestrictedCommandRouterTests : IDisposable
         public Task<int> InstallAppxAsync(string requestFile, TextWriter output, TextWriter error, CancellationToken cancellationToken)
         {
             output.Write("appx-request-ok");
+            return Task.FromResult(0);
+        }
+
+        public Task<int> RemoveCodexAsync(TextWriter output, TextWriter error, CancellationToken cancellationToken)
+        {
+            RemoveCodexCalled = true;
+            output.Write("appx-remove-ok");
             return Task.FromResult(0);
         }
 

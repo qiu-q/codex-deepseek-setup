@@ -106,6 +106,38 @@ public sealed class DefaultRestrictedOperations(
         return result.ExitCode;
     }
 
+    public async Task<int> RemoveCodexAsync(
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        const string script = """
+            $ErrorActionPreference='Stop'
+            Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-AppxPackage -AllUsers -Name OpenAI.Codex -ErrorAction SilentlyContinue | ForEach-Object {
+                Remove-AppxPackage -Package $_.PackageFullName -AllUsers -ErrorAction Stop
+            }
+            Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq 'OpenAI.Codex' | ForEach-Object {
+                Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName -ErrorAction Stop | Out-Null
+            }
+            if(Get-AppxPackage -AllUsers -Name OpenAI.Codex -ErrorAction SilentlyContinue){exit 2}
+            if(Get-AppxProvisionedPackage -Online | Where-Object DisplayName -eq 'OpenAI.Codex'){exit 3}
+            """;
+        var result = await processRunner.RunAsync(
+            "powershell.exe",
+            ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            null,
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            error.Write("Codex 系统包未能完全移除。");
+            return result.ExitCode;
+        }
+
+        output.Write("Codex 系统包已移除。");
+        return 0;
+    }
+
     public Task<int> ResumeAsync(TextWriter output, TextWriter error, CancellationToken cancellationToken) =>
         Task.FromResult(0);
 }

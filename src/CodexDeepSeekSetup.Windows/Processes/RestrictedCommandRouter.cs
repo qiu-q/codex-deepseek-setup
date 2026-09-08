@@ -19,6 +19,11 @@ public interface IRestrictedOperations
         TextWriter error,
         CancellationToken cancellationToken);
 
+    Task<int> RemoveCodexAsync(
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken);
+
     Task<int> StartServiceAsync(
         string serviceName,
         TextWriter output,
@@ -67,6 +72,8 @@ public sealed class RestrictedCommandRouter
             operations.ReadCredentialAsync(CredentialTargets.DeepSeekApiKey, output, error, cancellationToken),
             ["elevated", "appx-install", var requestFile] when IsOwnedRequestFile(requestFile) =>
                     operations.InstallAppxAsync(Path.GetFullPath(requestFile), output, error, cancellationToken),
+                    ["elevated", "appx-remove"] =>
+                    operations.RemoveCodexAsync(output, error, cancellationToken),
                     ["elevated", "start-service", var serviceName] when AllowedServices.Contains(serviceName) =>
                     operations.StartServiceAsync(serviceName, output, error, cancellationToken),
                     ["resume"] => operations.ResumeAsync(output, error, cancellationToken),

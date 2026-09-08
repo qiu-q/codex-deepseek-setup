@@ -10,7 +10,7 @@ public partial class App : Application
 {
     protected override async void OnStartup(StartupEventArgs e)
     {
-        if (e.Args is ["elevated", "appx-install", _])
+        if (e.Args is ["elevated", ..])
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             var runner = new SystemProcessRunner();
