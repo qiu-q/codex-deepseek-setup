@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using CodexDeepSeekSetup.Core.Results;
 
@@ -33,16 +35,34 @@ public interface IWizardActions
     Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken);
 }
 
-public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropertyChanged
+public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
+    private const int MaximumProgressEntries = 200;
+    private readonly IWizardActions actions;
+    private readonly Func<DateTimeOffset> clock;
     private WizardStep currentStep = WizardStep.Welcome;
     private string statusMessage = "准备检查这台电脑";
+    private string progressTitle = "准备开始";
+    private string progressDetail = "下载和安装将分开执行，每一步都会显示结果。";
+    private string currentFileName = string.Empty;
+    private string transferSummary = string.Empty;
     private bool isBusy;
     private bool canUsePortable;
     private bool isProgressVisible;
+    private bool isFileProgressIndeterminate;
     private double progress;
+    private double fileProgress;
+    private double overallProgress;
     private bool shouldExit;
     private CodexInstallStage installStage = CodexInstallStage.NotDownloaded;
+    private DownloadRateEstimator rateEstimator = new();
+    private string? lastProgressLogKey;
+
+    public MainWindowViewModel(IWizardActions actions, Func<DateTimeOffset>? clock = null)
+    {
+        this.actions = actions;
+        this.clock = clock ?? (() => DateTimeOffset.Now);
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -63,6 +83,32 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         get => statusMessage;
         private set => Set(ref statusMessage, value);
     }
+
+    public string ProgressTitle
+    {
+        get => progressTitle;
+        private set => Set(ref progressTitle, value);
+    }
+
+    public string ProgressDetail
+    {
+        get => progressDetail;
+        private set => Set(ref progressDetail, value);
+    }
+
+    public string CurrentFileName
+    {
+        get => currentFileName;
+        private set => Set(ref currentFileName, value);
+    }
+
+    public string TransferSummary
+    {
+        get => transferSummary;
+        private set => Set(ref transferSummary, value);
+    }
+
+    public ObservableCollection<string> ProgressEntries { get; } = [];
 
     public bool IsBusy
     {
@@ -153,6 +199,24 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         private set => Set(ref progress, value);
     }
 
+    public double FileProgress
+    {
+        get => fileProgress;
+        private set => Set(ref fileProgress, value);
+    }
+
+    public double OverallProgress
+    {
+        get => overallProgress;
+        private set => Set(ref overallProgress, value);
+    }
+
+    public bool IsFileProgressIndeterminate
+    {
+        get => isFileProgressIndeterminate;
+        private set => Set(ref isFileProgressIndeterminate, value);
+    }
+
     public async Task<OperationResult<Unit>> InitializeAsync(CancellationToken cancellationToken)
     {
         var result = await RunAsync(
@@ -200,9 +264,10 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
         IsProgressVisible = true;
         Progress = 0;
+        ResetTransferPresentation();
         InstallStage = CodexInstallStage.Downloading;
         CanUsePortable = false;
-        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        var progressReporter = CreateProgressReporter();
         OperationResult<Unit> result;
         try
         {
@@ -238,7 +303,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         IsProgressVisible = true;
         Progress = 0;
         InstallStage = CodexInstallStage.Installing;
-        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        var progressReporter = CreateProgressReporter();
         OperationResult<Unit> result;
         try
         {
@@ -283,7 +348,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         IsProgressVisible = true;
         Progress = 0;
         InstallStage = CodexInstallStage.Installing;
-        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        var progressReporter = CreateProgressReporter();
         OperationResult<Unit> result;
         try
         {
@@ -386,12 +451,89 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
     private void ApplyProgress(SetupProgress update)
     {
+        var timestamp = clock();
         StatusMessage = update.Message;
+        ProgressTitle = update.Message;
+        ProgressDetail = string.IsNullOrWhiteSpace(update.Detail) ? DescribePhase(update.Phase) : update.Detail;
         if (update.Percent is double percent)
         {
-            Progress = Math.Clamp(percent, 0, 100);
+            var normalized = Math.Clamp(percent, 0, 100);
+            Progress = normalized;
+            OverallProgress = normalized;
+        }
+
+        if (!string.IsNullOrWhiteSpace(update.FileName))
+        {
+            CurrentFileName = update.FileName;
+            var metrics = rateEstimator.Update(update, timestamp);
+            IsFileProgressIndeterminate = update.IsIndeterminate || metrics.FilePercent is null;
+            if (metrics.FilePercent is double filePercent)
+            {
+                FileProgress = filePercent;
+            }
+            TransferSummary = string.Join(
+                " · ",
+                new[] { metrics.SizeText, metrics.SpeedText, metrics.EtaText }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+        }
+        else if (update.Phase != SetupPhase.Download)
+        {
+            CurrentFileName = string.Empty;
+            TransferSummary = string.Empty;
+            FileProgress = 0;
+            IsFileProgressIndeterminate = update.IsIndeterminate;
+        }
+
+        AddProgressEntry(update, timestamp);
+    }
+
+    private IProgress<SetupProgress> CreateProgressReporter() =>
+        new ContextProgress<SetupProgress>(SynchronizationContext.Current, ApplyProgress);
+
+    private void ResetTransferPresentation()
+    {
+        rateEstimator = new DownloadRateEstimator();
+        lastProgressLogKey = null;
+        ProgressTitle = "正在准备下载";
+        ProgressDetail = "即将连接 OpenAI 官方下载地址。";
+        CurrentFileName = string.Empty;
+        TransferSummary = string.Empty;
+        FileProgress = 0;
+        OverallProgress = 0;
+        IsFileProgressIndeterminate = false;
+    }
+
+    private void AddProgressEntry(SetupProgress update, DateTimeOffset timestamp)
+    {
+        var key = string.Join('|', update.Phase, update.Message, update.Detail, update.FileName);
+        if (string.Equals(lastProgressLogKey, key, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lastProgressLogKey = key;
+        var detail = string.IsNullOrWhiteSpace(update.Detail) ? string.Empty : $" — {update.Detail}";
+        ProgressEntries.Add(
+            $"{timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)}  [{DescribePhase(update.Phase)}] {update.Message}{detail}");
+        while (ProgressEntries.Count > MaximumProgressEntries)
+        {
+            ProgressEntries.RemoveAt(0);
         }
     }
+
+    private static string DescribePhase(SetupPhase phase) => phase switch
+    {
+        SetupPhase.Check => "检查",
+        SetupPhase.Download => "下载",
+        SetupPhase.Verify => "校验",
+        SetupPhase.Authorization => "授权",
+        SetupPhase.Deploy => "部署",
+        SetupPhase.Register => "注册",
+        SetupPhase.Cli => "命令行组件",
+        SetupPhase.SaveState => "保存状态",
+        SetupPhase.Complete => "完成",
+        _ => "准备"
+    };
 
     private void RaiseStepProperties()
     {
@@ -429,8 +571,17 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private void OnPropertyChanged(string? propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    private sealed class ContextProgress<T>(SynchronizationContext? context, Action<T> handler) : IProgress<T>
     {
-        public void Report(T value) => handler(value);
+        public void Report(T value)
+        {
+            if (context is null || ReferenceEquals(SynchronizationContext.Current, context))
+            {
+                handler(value);
+                return;
+            }
+
+            context.Send(state => handler((T)state!), value);
+        }
     }
 }

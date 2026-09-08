@@ -65,6 +65,54 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task DownloadAsync_ProjectsDetailedFileProgressSpeedAndEta()
+    {
+        const long mib = 1024 * 1024;
+        var actions = new FakeActions
+        {
+            PrepareProgress =
+            [
+                new SetupProgress("正在下载 ChatGPT-x64.msix", 20, SetupPhase.Download, "接收官方安装包", "ChatGPT-x64.msix", mib, 5 * mib),
+                new SetupProgress("正在下载 ChatGPT-x64.msix", 70, SetupPhase.Download, "接收官方安装包", "ChatGPT-x64.msix", 3 * mib, 5 * mib)
+            ]
+        };
+        var times = new Queue<DateTimeOffset>(
+        [
+            DateTimeOffset.Parse("2026-09-08T12:00:00+08:00"),
+            DateTimeOffset.Parse("2026-09-08T12:00:01+08:00")
+        ]);
+        var viewModel = new MainWindowViewModel(actions, () => times.Dequeue());
+
+        var result = await viewModel.DownloadAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("正在下载 ChatGPT-x64.msix", viewModel.ProgressTitle);
+        Assert.Equal("接收官方安装包", viewModel.ProgressDetail);
+        Assert.Equal("ChatGPT-x64.msix", viewModel.CurrentFileName);
+        Assert.Equal(60, viewModel.FileProgress);
+        Assert.Equal(70, viewModel.OverallProgress);
+        Assert.Equal("3.00 MB / 5.00 MB · 2.00 MB/s · 约 1 秒", viewModel.TransferSummary);
+        Assert.Single(viewModel.ProgressEntries);
+        Assert.StartsWith("12:00:00", viewModel.ProgressEntries[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_TrimsDetailedHistoryToLatestTwoHundredEntries()
+    {
+        var updates = Enumerable.Range(0, 205)
+            .Select(index => new SetupProgress($"阶段 {index}", index % 100, SetupPhase.Download, $"详细 {index}"))
+            .ToArray();
+        var actions = new FakeActions { PrepareProgress = updates };
+        var viewModel = new MainWindowViewModel(actions);
+
+        await viewModel.DownloadAsync(default);
+
+        Assert.Equal(200, viewModel.ProgressEntries.Count);
+        Assert.DoesNotContain("阶段 0", viewModel.ProgressEntries[0], StringComparison.Ordinal);
+        Assert.Contains("阶段 204", viewModel.ProgressEntries[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task InstallAsync_OnFailure_KeepsPreparedPayloadForDirectRetry()
     {
         var actions = new FakeActions { InstallFailuresRemaining = 1 };
@@ -253,11 +301,15 @@ public sealed class MainWindowViewModelTests
         public bool CleanupWasCalled { get; private set; }
         public int PrepareCallCount { get; private set; }
         public int InstallCallCount { get; private set; }
+        public IReadOnlyList<SetupProgress>? PrepareProgress { get; init; }
         public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
         public Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
             PrepareCallCount++;
-            progress?.Report(new SetupProgress("正在下载 OpenAI 官方文件", 60));
+            foreach (var update in PrepareProgress ?? [new SetupProgress("正在下载 OpenAI 官方文件", 60)])
+            {
+                progress?.Report(update);
+            }
             if (!PrepareSucceeds)
             {
                 return Task.FromResult(OperationResult<Unit>.Failure("download.network.failed", "官方文件下载失败"));

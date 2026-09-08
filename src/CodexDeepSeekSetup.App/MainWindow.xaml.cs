@@ -46,11 +46,14 @@ public partial class MainWindow : Window
     private async void CheckButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.CheckAsync(lifetime.Token));
 
+    private async void DownloadButton_Click(object sender, RoutedEventArgs e) =>
+        await RunUiAsync(() => viewModel.DownloadAsync(lifetime.Token));
+
     private async void InstallButton_Click(object sender, RoutedEventArgs e)
     {
         var confirmed = MessageBox.Show(
             this,
-            "将从 OpenAI 官方地址下载并安装 Codex。接下来可能出现 Windows 管理员授权窗口；请在那里输入 Windows 管理员密码，它不是 DeepSeek API Key。\n\n继续安装吗？",
+            "将使用已经下载并校验通过的官方文件安装 Codex。接下来可能出现 Windows 管理员授权窗口；请在那里输入 Windows 管理员密码，它不是 DeepSeek API Key。\n\n安装失败后可以直接重试，不会重新下载。继续吗？",
             "安装官方 Codex",
             MessageBoxButton.YesNo,
             MessageBoxImage.Information,

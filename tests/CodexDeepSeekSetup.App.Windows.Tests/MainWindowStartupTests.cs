@@ -22,6 +22,17 @@ public sealed class MainWindowStartupTests
                 Assert.NotNull(window.FindName("CompleteStepPanel"));
                 Assert.NotNull(window.FindName("LaunchCodexButton"));
                 Assert.NotNull(window.FindName("CloseAssistantButton"));
+                var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
+                var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
+                var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));
+                var overallProgress = Assert.IsType<ProgressBar>(window.FindName("OverallProgressBar"));
+                Assert.IsType<TextBlock>(window.FindName("DownloadPhaseLabel"));
+                Assert.IsType<TextBlock>(window.FindName("InstallPhaseLabel"));
+                Assert.IsType<ListBox>(window.FindName("ProgressLogList"));
+                Assert.Equal("CanDownload", BindingOperations.GetBinding(downloadButton, Button.IsEnabledProperty)?.Path.Path);
+                Assert.Equal("CanInstall", BindingOperations.GetBinding(installButton, Button.IsEnabledProperty)?.Path.Path);
+                Assert.Equal("FileProgress", BindingOperations.GetBinding(fileProgress, ProgressBar.ValueProperty)?.Path.Path);
+                Assert.Equal("OverallProgress", BindingOperations.GetBinding(overallProgress, ProgressBar.ValueProperty)?.Path.Path);
                 var cleanupButton = Assert.IsType<Button>(window.FindName("CleanupEverythingButton"));
                 var cleanupBinding = BindingOperations.GetBinding(cleanupButton, Button.IsEnabledProperty);
                 Assert.Equal("CanCleanup", cleanupBinding?.Path.Path);
