@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace CodexDeepSeekSetup.App.Windows.Tests;
 
@@ -20,7 +22,9 @@ public sealed class MainWindowStartupTests
                 Assert.NotNull(window.FindName("CompleteStepPanel"));
                 Assert.NotNull(window.FindName("LaunchCodexButton"));
                 Assert.NotNull(window.FindName("CloseAssistantButton"));
-                Assert.NotNull(window.FindName("CleanupEverythingButton"));
+                var cleanupButton = Assert.IsType<Button>(window.FindName("CleanupEverythingButton"));
+                var cleanupBinding = BindingOperations.GetBinding(cleanupButton, Button.IsEnabledProperty);
+                Assert.Equal("CanCleanup", cleanupBinding?.Path.Path);
                 window.Close();
             }
             catch (Exception exception)

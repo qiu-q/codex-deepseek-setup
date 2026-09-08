@@ -8,6 +8,7 @@ using CodexDeepSeekSetup.Core.DeepSeek;
 using CodexDeepSeekSetup.Core.Downloads;
 using CodexDeepSeekSetup.Core.Results;
 using CodexDeepSeekSetup.Core.Workflow;
+using CodexDeepSeekSetup.Windows.Cleanup;
 using CodexDeepSeekSetup.Windows.Diagnostics;
 using CodexDeepSeekSetup.Windows.Packages;
 using CodexDeepSeekSetup.Windows.Processes;
@@ -29,6 +30,7 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly CodexConfigService configService;
     private readonly IProcessRunner processRunner;
     private readonly AssistantInstallStateStore installStateStore;
+    private readonly UserCleanupService userCleanupService;
     private readonly string helperSourcePath;
     private readonly string helperPath;
     private readonly string previousCodexCliPath;
@@ -38,6 +40,8 @@ public sealed class DesktopSetupActions : IWizardActions
     private bool? codexExistedAtStart;
 
     public bool IsCodexInstalled { get; private set; }
+
+    public bool HasInstallLedger => installState is not null;
 
     private DesktopSetupActions(
         BuildFlavorOptions flavor,
@@ -51,6 +55,7 @@ public sealed class DesktopSetupActions : IWizardActions
         CodexConfigService configService,
         IProcessRunner processRunner,
         AssistantInstallStateStore installStateStore,
+        UserCleanupService userCleanupService,
         string helperSourcePath,
         string helperPath,
         string previousCodexCliPath)
@@ -66,6 +71,7 @@ public sealed class DesktopSetupActions : IWizardActions
         this.configService = configService;
         this.processRunner = processRunner;
         this.installStateStore = installStateStore;
+        this.userCleanupService = userCleanupService;
         this.helperSourcePath = helperSourcePath;
         this.helperPath = helperPath;
         this.previousCodexCliPath = previousCodexCliPath;
@@ -82,6 +88,11 @@ public sealed class DesktopSetupActions : IWizardActions
             "CodexDeepSeekSetup",
             "CodexDeepSeekSetup.Helper.exe");
         var stateStore = new AssistantInstallStateStore(Path.Combine(GetAssistantDataRoot(), "install-state.json"));
+        var secretStore = new WindowsCredentialStore();
+        var cleanupService = new UserCleanupService(
+            secretStore,
+            new WindowsUserEnvironment(),
+            CleanupRoots.ForCurrentUser());
         var requestDirectory = GetRequestDirectory();
         var elevatedExecutable = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前安装程序路径。");
         var actions = new DesktopSetupActions(
@@ -92,10 +103,11 @@ public sealed class DesktopSetupActions : IWizardActions
             new PortableCodexInstaller(verifier, runner),
             new CodexCliBootstrapper(runner),
             new DeepSeekClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }),
-            new WindowsCredentialStore(),
+            secretStore,
             new CodexConfigService(),
             runner,
             stateStore,
+            cleanupService,
             helperSource,
             helper,
             Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty);
@@ -417,6 +429,70 @@ public sealed class DesktopSetupActions : IWizardActions
             ? packageManager.LaunchAndVerifyAsync(cancellationToken)
             : LaunchPortableAsync(portableInstall, cancellationToken);
 
+    public async Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return Failure("windows.required", "彻底清理只能在 Windows 上执行。");
+        }
+
+        installState ??= await installStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+
+        var preparedFinalizer = PrepareCleanupFinalizer();
+        if (!preparedFinalizer.IsSuccess)
+        {
+            return Failure(preparedFinalizer.ErrorCode!, preparedFinalizer.ErrorMessage!);
+        }
+
+        var finalizerPath = preparedFinalizer.Value!;
+        var finalizerStarted = false;
+        try
+        {
+            var removed = await packageManager.RemoveAsync(cancellationToken).ConfigureAwait(false);
+            if (!removed.IsSuccess)
+            {
+                return removed;
+            }
+
+            var previousCliPath = installState?.PreviousCodexCliPath;
+            var userCleanup = await userCleanupService.CleanAsync(previousCliPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (!userCleanup.IsSuccess)
+            {
+                return userCleanup;
+            }
+
+            var startInfo = new ProcessStartInfo(finalizerPath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetTempPath()
+            };
+            startInfo.ArgumentList.Add("finalize-cleanup");
+            startInfo.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(AppContext.BaseDirectory);
+            using var finalizerProcess = Process.Start(startInfo);
+            if (finalizerProcess is null)
+            {
+                return Failure("cleanup.finalizer.start.failed", "Codex 和用户数据已删除，但无法启动安装助手自删除程序。");
+            }
+
+            finalizerStarted = true;
+            return OperationResult<Unit>.Success(default);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return Failure("cleanup.finalizer.start.failed", "Codex 和用户数据已删除，但无法启动安装助手自删除程序。");
+        }
+        finally
+        {
+            if (!finalizerStarted)
+            {
+                TryDeleteFile(finalizerPath);
+            }
+        }
+    }
+
     private async Task<OperationResult<CodexPayload>> PreparePayloadAsync(
         IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
@@ -525,6 +601,44 @@ public sealed class DesktopSetupActions : IWizardActions
     private static string GetAssistantDataRoot() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CodexDeepSeekSetup");
+
+    private OperationResult<string> PrepareCleanupFinalizer()
+    {
+        if (!File.Exists(helperSourcePath))
+        {
+            return OperationResult<string>.Failure(
+                "cleanup.finalizer.missing",
+                "安装助手缺少自删除组件，请保留完整的发布目录后重试。");
+        }
+
+        var destination = Path.Combine(Path.GetTempPath(), $"CodexDeepSeekCleanup-{Guid.NewGuid():N}.exe");
+        try
+        {
+            File.Copy(helperSourcePath, destination, overwrite: false);
+            return OperationResult<string>.Success(destination);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            TryDeleteFile(destination);
+            return OperationResult<string>.Failure(
+                "cleanup.finalizer.copy.failed",
+                "无法准备自删除组件，尚未开始清理。请检查杀毒软件或临时目录权限。");
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
 
     private AssistantInstallState CreateInstallState(string mode, string cliPath, string? portableDirectory) => new(
         SchemaVersion: 1,

@@ -90,6 +90,48 @@ public partial class MainWindow : Window
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
+    private async void CleanupEverythingButton_Click(object sender, RoutedEventArgs e)
+    {
+        var confirmed = MessageBox.Show(
+            this,
+            "此操作将永久删除：\n\n" +
+            "• 当前电脑上的 OpenAI Codex 应用\n" +
+            "• 整个 %USERPROFILE%\\.codex（包括配置、插件缓存和会话）\n" +
+            "• DeepSeek API Key 的 Windows 凭据\n" +
+            "• 本助手创建的下载缓存、CLI、便携目录和安装记录\n" +
+            "• 本安装助手自身\n\n" +
+            "删除后无法恢复。是否继续？",
+            "彻底卸载并清理",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmed != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        if (viewModel.NeedsLegacyCleanupWarning)
+        {
+            var legacyConfirmed = MessageBox.Show(
+                this,
+                "没有找到完整的安装记录，无法确认 Codex 是否在使用本助手前已存在。\n\n本次仍会删除检测到的官方 Codex 和整个 .codex 目录。确定继续吗？",
+                "再次确认",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (legacyConfirmed != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+
+        var result = await RunUiAsync(() => viewModel.CleanupAsync(lifetime.Token));
+        if (result?.IsSuccess == true && viewModel.ShouldExit)
+        {
+            Application.Current.Shutdown();
+        }
+    }
+
     private void OpenLink_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string url })

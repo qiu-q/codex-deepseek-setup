@@ -8,7 +8,9 @@ public sealed record CleanupRoots(
     string AssistantDataRoot,
     string AssistantInstallRoot,
     string CliRoot,
-    string PortableRoot)
+    string PortableRoot,
+    string CommonDocuments,
+    string SharedAssistantRoot)
 {
     public IReadOnlyList<string> ManagedRoots =>
     [
@@ -16,13 +18,15 @@ public sealed record CleanupRoots(
         PortableRoot,
         CliRoot,
         AssistantInstallRoot,
-        AssistantDataRoot
+        AssistantDataRoot,
+        SharedAssistantRoot
     ];
 
     public static CleanupRoots ForCurrentUser()
     {
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var commonDocuments = Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments);
         return new CleanupRoots(
             profile,
             local,
@@ -31,7 +35,9 @@ public sealed record CleanupRoots(
             Path.Combine(local, "CodexDeepSeekSetup"),
             Path.Combine(local, "Programs", "CodexDeepSeekSetup"),
             Path.Combine(local, "Programs", "OpenAI", "Codex"),
-            Path.Combine(local, "Programs", "OpenAI", "CodexPortable"));
+            Path.Combine(local, "Programs", "OpenAI", "CodexPortable"),
+            commonDocuments,
+            Path.Combine(commonDocuments, "CodexDeepSeekSetup"));
     }
 
     public void Validate()
@@ -39,18 +45,23 @@ public sealed record CleanupRoots(
         var profile = Normalize(UserProfile);
         var local = Normalize(LocalAppData);
         var desktop = Normalize(Desktop);
+        var commonDocuments = Normalize(CommonDocuments);
         var broadRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             profile,
             local,
             desktop,
+            commonDocuments,
             Normalize(Path.GetPathRoot(profile) ?? throw new InvalidOperationException("用户目录没有磁盘根路径。"))
         };
 
         var normalized = ManagedRoots.Select(Normalize).ToArray();
+        var localRoots = new[] { PortableRoot, CliRoot, AssistantInstallRoot, AssistantDataRoot }
+            .Select(Normalize);
         if (normalized.Any(broadRoots.Contains) ||
-            !IsStrictChild(normalized[0], profile) ||
-            normalized.Skip(1).Any(path => !IsStrictChild(path, local)) ||
+            !IsStrictChild(Normalize(CodexHome), profile) ||
+            localRoots.Any(path => !IsStrictChild(path, local)) ||
+            !IsStrictChild(Normalize(SharedAssistantRoot), commonDocuments) ||
             normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length)
         {
             throw new InvalidOperationException("清理目录超出允许的用户数据范围。");

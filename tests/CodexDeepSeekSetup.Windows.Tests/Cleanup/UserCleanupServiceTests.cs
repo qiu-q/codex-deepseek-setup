@@ -34,6 +34,7 @@ public sealed class UserCleanupServiceTests : IDisposable
     [InlineData("profile")]
     [InlineData("local")]
     [InlineData("desktop")]
+    [InlineData("common")]
     public void Validate_RejectsBroadDeletionRoot(string broadRoot)
     {
         var roots = CreateRoots();
@@ -41,9 +42,12 @@ public sealed class UserCleanupServiceTests : IDisposable
         {
             "profile" => roots.UserProfile,
             "local" => roots.LocalAppData,
-            _ => roots.Desktop
+            "desktop" => roots.Desktop,
+            _ => roots.CommonDocuments
         };
-        roots = roots with { CodexHome = unsafePath };
+        roots = broadRoot == "common"
+            ? roots with { SharedAssistantRoot = unsafePath }
+            : roots with { CodexHome = unsafePath };
 
         Assert.Throws<InvalidOperationException>(roots.Validate);
     }
@@ -87,6 +91,7 @@ public sealed class UserCleanupServiceTests : IDisposable
     {
         var profile = Path.Combine(root, "profile");
         var local = Path.Combine(profile, "AppData", "Local");
+        var common = Path.Combine(root, "Public", "Documents");
         return new CleanupRoots(
             profile,
             local,
@@ -95,7 +100,9 @@ public sealed class UserCleanupServiceTests : IDisposable
             Path.Combine(local, "CodexDeepSeekSetup"),
             Path.Combine(local, "Programs", "CodexDeepSeekSetup"),
             Path.Combine(local, "Programs", "OpenAI", "Codex"),
-            Path.Combine(local, "Programs", "OpenAI", "CodexPortable"));
+            Path.Combine(local, "Programs", "OpenAI", "CodexPortable"),
+            common,
+            Path.Combine(common, "CodexDeepSeekSetup"));
     }
 
     private sealed class FakeUserEnvironment(string? codexCliPath) : IUserEnvironment

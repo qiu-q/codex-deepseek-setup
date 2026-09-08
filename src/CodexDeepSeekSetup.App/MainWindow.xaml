@@ -120,7 +120,12 @@
                         <Separator Margin="0,24,0,14" />
                         <TextBlock Text="需要恢复测试电脑时" FontWeight="SemiBold" />
                         <TextBlock Text="可彻底删除 Codex、整个 .codex 数据目录、DeepSeek 凭据、缓存、CLI 和本安装助手。此操作不可恢复。" TextWrapping="Wrap" Margin="0,6,0,4" Foreground="#991B1B" />
-                        <Button x:Name="CleanupEverythingButton" Content="彻底卸载并清理" IsEnabled="False" HorizontalAlignment="Left" Foreground="#B91C1C" />
+                        <Button x:Name="CleanupEverythingButton"
+                                Content="彻底卸载并清理"
+                                Click="CleanupEverythingButton_Click"
+                                IsEnabled="{Binding CanCleanup}"
+                                HorizontalAlignment="Left"
+                                Foreground="#B91C1C" />
                     </StackPanel>
                 </Border>
             </Grid>

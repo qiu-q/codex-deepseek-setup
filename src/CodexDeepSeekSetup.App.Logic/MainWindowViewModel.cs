@@ -14,11 +14,13 @@ public enum WizardStep
 public interface IWizardActions
 {
     bool IsCodexInstalled { get; }
+    bool HasInstallLedger { get; }
     Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> InstallPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken);
 }
 
 public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropertyChanged
@@ -29,6 +31,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private bool canUsePortable;
     private bool isProgressVisible;
     private double progress;
+    private bool shouldExit;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -86,6 +89,22 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
     public bool CanLaunch => IsCompleteStep && !IsBusy;
 
+    public bool CanCleanup => IsCompleteStep && !IsBusy && !ShouldExit;
+
+    public bool NeedsLegacyCleanupWarning => !actions.HasInstallLedger;
+
+    public bool ShouldExit
+    {
+        get => shouldExit;
+        private set
+        {
+            if (Set(ref shouldExit, value))
+            {
+                OnPropertyChanged(nameof(CanCleanup));
+            }
+        }
+    }
+
     public bool CanRunPortable => CanUsePortable && CanInstall;
 
     public bool IsProgressVisible
@@ -122,6 +141,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             CurrentStep = WizardStep.Welcome;
             StatusMessage = "准备安装 Codex";
         }
+        RaiseActionMetadata();
         return result;
     }
 
@@ -133,6 +153,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             CurrentStep = WizardStep.DeepSeek;
             StatusMessage = "检测到 Codex 已安装，可以直接配置 DeepSeek";
         }
+        RaiseActionMetadata();
         return result;
     }
 
@@ -163,6 +184,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         if (result.IsSuccess)
         {
             CurrentStep = WizardStep.DeepSeek;
+            RaiseActionMetadata();
         }
         else
         {
@@ -203,6 +225,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         {
             CanUsePortable = false;
             CurrentStep = WizardStep.DeepSeek;
+            RaiseActionMetadata();
         }
         return result;
     }
@@ -222,6 +245,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         if (result.IsSuccess)
         {
             CurrentStep = WizardStep.Complete;
+            RaiseActionMetadata();
         }
         return result;
     }
@@ -230,6 +254,25 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         CurrentStep == WizardStep.Complete
             ? RunAsync("正在启动并检查 Codex 窗口…", "Codex 已启动", actions.LaunchAsync, cancellationToken)
             : Task.FromResult(OperationResult<Unit>.Failure("wizard.order", "请先验证 API Key 并完成配置。"));
+
+    public async Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken)
+    {
+        if (CurrentStep != WizardStep.Complete)
+        {
+            return OperationResult<Unit>.Failure("wizard.order", "只有完成配置后才能执行彻底清理。");
+        }
+
+        var result = await RunAsync(
+            "正在移除 Codex 和当前用户数据…",
+            "清理已完成，安装助手即将关闭",
+            actions.CleanupAsync,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            ShouldExit = true;
+        }
+        return result;
+    }
 
     private async Task<OperationResult<Unit>> RunAsync(
         string runningMessage,
@@ -279,7 +322,11 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         OnPropertyChanged(nameof(CanConfigure));
         OnPropertyChanged(nameof(CanLaunch));
         OnPropertyChanged(nameof(CanRunPortable));
+        OnPropertyChanged(nameof(CanCleanup));
     }
+
+    private void RaiseActionMetadata() =>
+        OnPropertyChanged(nameof(NeedsLegacyCleanupWarning));
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

@@ -127,14 +127,72 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(WizardStep.DeepSeek, viewModel.CurrentStep);
     }
 
+    [Fact]
+    public async Task CleanupAsync_IsBlockedUntilSetupIsComplete()
+    {
+        var actions = new FakeActions();
+        var viewModel = new MainWindowViewModel(actions);
+
+        var result = await viewModel.CleanupAsync(default);
+
+        Assert.False(result.IsSuccess);
+        Assert.False(actions.CleanupWasCalled);
+        Assert.False(viewModel.ShouldExit);
+    }
+
+    [Fact]
+    public async Task CleanupAsync_WhenCleanupFails_KeepsAssistantOpenForRetry()
+    {
+        var actions = new FakeActions { CleanupSucceeds = false };
+        var viewModel = await CreateCompletedViewModelAsync(actions);
+
+        var result = await viewModel.CleanupAsync(default);
+
+        Assert.False(result.IsSuccess);
+        Assert.True(actions.CleanupWasCalled);
+        Assert.False(viewModel.ShouldExit);
+        Assert.True(viewModel.CanCleanup);
+        Assert.Contains("未能完全清理", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CleanupAsync_WhenCleanupSucceeds_RequestsApplicationExit()
+    {
+        var actions = new FakeActions { HasInstallLedger = true };
+        var viewModel = await CreateCompletedViewModelAsync(actions);
+
+        var result = await viewModel.CleanupAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(actions.CleanupWasCalled);
+        Assert.True(viewModel.ShouldExit);
+        Assert.False(viewModel.CanCleanup);
+        Assert.False(viewModel.NeedsLegacyCleanupWarning);
+    }
+
+    private static async Task<MainWindowViewModel> CreateCompletedViewModelAsync(FakeActions actions)
+    {
+        var viewModel = new MainWindowViewModel(actions);
+        await viewModel.InitializeAsync(default);
+        if (viewModel.IsInstallStep)
+        {
+            await viewModel.InstallAsync(default);
+        }
+        await viewModel.ConfigureAsync("sk-valid12345678", default);
+        return viewModel;
+    }
+
     private sealed class FakeActions : IWizardActions
     {
         public bool IsCodexInstalled { get; set; }
+        public bool HasInstallLedger { get; set; }
         public bool KeySucceeds { get; init; } = true;
         public bool InstallSucceeds { get; init; } = true;
         public bool LaunchSucceeds { get; init; } = true;
+        public bool CleanupSucceeds { get; init; } = true;
         public bool LaunchWasCalled { get; private set; }
         public bool PortableInstallWasCalled { get; private set; }
+        public bool CleanupWasCalled { get; private set; }
         public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
         public Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
@@ -158,6 +216,13 @@ public sealed class MainWindowViewModelTests
         {
             LaunchWasCalled = true;
             return LaunchSucceeds ? Ok() : Task.FromResult(OperationResult<Unit>.Failure("launch.window.missing", "没有检测到 Codex 窗口"));
+        }
+        public Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken)
+        {
+            CleanupWasCalled = true;
+            return CleanupSucceeds
+                ? Ok()
+                : Task.FromResult(OperationResult<Unit>.Failure("cleanup.failed", "未能完全清理，请重试"));
         }
         private static Task<OperationResult<Unit>> Ok() => Task.FromResult(OperationResult<Unit>.Success(default));
     }
