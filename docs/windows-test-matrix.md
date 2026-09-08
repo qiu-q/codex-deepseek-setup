@@ -1,5 +1,11 @@
 # Windows 发布测试矩阵
 
+在 Windows 上先运行启动回归测试：
+
+```powershell
+dotnet test .\tests\CodexDeepSeekSetup.App.Windows.Tests\CodexDeepSeekSetup.App.Windows.Tests.csproj -c Release
+```
+
 未完成下表前，不得标记为 Windows 发布就绪。
 
 | 系统 | 账户 | 下载 | 签名 | UAC 部署 | 当前用户注册 | CLI | DeepSeek | 启动 | 回滚 | 日志无 Key | 结果 |
