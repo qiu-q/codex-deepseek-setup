@@ -7,6 +7,7 @@ using CodexDeepSeekSetup.Core.Configuration;
 using CodexDeepSeekSetup.Core.DeepSeek;
 using CodexDeepSeekSetup.Core.Downloads;
 using CodexDeepSeekSetup.Core.Results;
+using CodexDeepSeekSetup.Core.Workflow;
 using CodexDeepSeekSetup.Windows.Diagnostics;
 using CodexDeepSeekSetup.Windows.Packages;
 using CodexDeepSeekSetup.Windows.Processes;
@@ -27,10 +28,14 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly ISecretStore secretStore;
     private readonly CodexConfigService configService;
     private readonly IProcessRunner processRunner;
+    private readonly AssistantInstallStateStore installStateStore;
     private readonly string helperSourcePath;
     private readonly string helperPath;
+    private readonly string previousCodexCliPath;
     private CodexPayload? payload;
     private PortableCodexInstall? portableInstall;
+    private AssistantInstallState? installState;
+    private bool? codexExistedAtStart;
 
     public bool IsCodexInstalled { get; private set; }
 
@@ -45,8 +50,10 @@ public sealed class DesktopSetupActions : IWizardActions
         ISecretStore secretStore,
         CodexConfigService configService,
         IProcessRunner processRunner,
+        AssistantInstallStateStore installStateStore,
         string helperSourcePath,
-        string helperPath)
+        string helperPath,
+        string previousCodexCliPath)
     {
         this.flavor = flavor;
         this.downloader = downloader;
@@ -58,8 +65,10 @@ public sealed class DesktopSetupActions : IWizardActions
         this.secretStore = secretStore;
         this.configService = configService;
         this.processRunner = processRunner;
+        this.installStateStore = installStateStore;
         this.helperSourcePath = helperSourcePath;
         this.helperPath = helperPath;
+        this.previousCodexCliPath = previousCodexCliPath;
     }
 
     public static DesktopSetupActions Create(BuildFlavorOptions flavor)
@@ -72,6 +81,7 @@ public sealed class DesktopSetupActions : IWizardActions
             "Programs",
             "CodexDeepSeekSetup",
             "CodexDeepSeekSetup.Helper.exe");
+        var stateStore = new AssistantInstallStateStore(Path.Combine(GetAssistantDataRoot(), "install-state.json"));
         var requestDirectory = GetRequestDirectory();
         var elevatedExecutable = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前安装程序路径。");
         var actions = new DesktopSetupActions(
@@ -85,8 +95,10 @@ public sealed class DesktopSetupActions : IWizardActions
             new WindowsCredentialStore(),
             new CodexConfigService(),
             runner,
+            stateStore,
             helperSource,
-            helper);
+            helper,
+            Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty);
         var portableRoot = GetPortableRoot();
         var persistedCli = Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User);
         actions.portableInstall = PortableCodexInstaller.TryRecover(portableRoot, persistedCli);
@@ -113,6 +125,8 @@ public sealed class DesktopSetupActions : IWizardActions
         }
 
         var report = result.Value!;
+        installState ??= await installStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        codexExistedAtStart ??= installState?.CodexExistedBefore ?? report.IsCodexInstalled;
         if (report.IsCodexInstalled)
         {
             portableInstall = null;
@@ -183,6 +197,12 @@ public sealed class DesktopSetupActions : IWizardActions
 
         IsCodexInstalled = true;
         portableInstall = null;
+        var stateSaved = await SaveInstallStateAsync("official", cli.Value!, null, cancellationToken)
+            .ConfigureAwait(false);
+        if (!stateSaved.IsSuccess)
+        {
+            return stateSaved;
+        }
         return OperationResult<Unit>.Success(default);
     }
 
@@ -232,6 +252,16 @@ public sealed class DesktopSetupActions : IWizardActions
         Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.User);
         Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.Process);
         IsCodexInstalled = true;
+        var stateSaved = await SaveInstallStateAsync(
+                "portable",
+                portableInstall.CliPath,
+                destination,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!stateSaved.IsSuccess)
+        {
+            return stateSaved;
+        }
         return OperationResult<Unit>.Success(default);
     }
 
@@ -357,6 +387,20 @@ public sealed class DesktopSetupActions : IWizardActions
                 : Failure("codex.rollback.failed", "Codex 配置验证失败，自动恢复也未完全成功，请使用备份目录手动恢复。");
         }
 
+        installState ??= CreateInstallState(
+            codexExistedAtStart == true ? "existing" : portableInstall is null ? "official" : "portable",
+            cli.Value!,
+            portableInstall is null ? null : GetPortableRoot());
+        installState = installState with { DeepSeekConfigured = true };
+        try
+        {
+            await installStateStore.SaveAsync(installState, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure("state.write.failed", "DeepSeek 已配置，但无法保存清理记录。请不要删除安装助手，并重试配置。");
+        }
+
         return OperationResult<Unit>.Success(default);
     }
 
@@ -467,6 +511,47 @@ public sealed class DesktopSetupActions : IWizardActions
         "Programs",
         "OpenAI",
         "CodexPortable");
+
+    private static string GetAssistantDataRoot() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CodexDeepSeekSetup");
+
+    private AssistantInstallState CreateInstallState(string mode, string cliPath, string? portableDirectory) => new(
+        SchemaVersion: 1,
+        CodexExistedBefore: codexExistedAtStart == true,
+        InstallMode: mode,
+        PreviousCodexCliPath: string.IsNullOrWhiteSpace(previousCodexCliPath) ? null : previousCodexCliPath,
+        DeepSeekConfigured: false,
+        DownloadCache: Path.Combine(GetAssistantDataRoot(), "Downloads"),
+        PortableDirectory: portableDirectory,
+        CliDirectory: Path.GetDirectoryName(cliPath),
+        CredentialHelperPath: helperPath,
+        AssistantDirectory: AppContext.BaseDirectory);
+
+    private async Task<OperationResult<Unit>> SaveInstallStateAsync(
+        string mode,
+        string cliPath,
+        string? portableDirectory,
+        CancellationToken cancellationToken)
+    {
+        installState ??= CreateInstallState(mode, cliPath, portableDirectory);
+        installState = installState with
+        {
+            InstallMode = mode,
+            PortableDirectory = portableDirectory,
+            CliDirectory = Path.GetDirectoryName(cliPath),
+            AssistantDirectory = AppContext.BaseDirectory
+        };
+        try
+        {
+            await installStateStore.SaveAsync(installState, cancellationToken).ConfigureAwait(false);
+            return OperationResult<Unit>.Success(default);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure("state.write.failed", "Codex 已安装，但无法保存清理记录。请保留安装助手并重试。");
+        }
+    }
 
     private static OperationResult<Unit> Failure(string code, string message) =>
         OperationResult<Unit>.Failure(code, message);
