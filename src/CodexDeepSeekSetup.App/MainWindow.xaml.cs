@@ -10,6 +10,7 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel viewModel;
     private readonly CancellationTokenSource lifetime = new();
+    private bool initialized;
 
     public MainWindow()
     {
@@ -24,6 +25,17 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (initialized)
+        {
+            return;
+        }
+
+        initialized = true;
+        await RunUiAsync(() => viewModel.InitializeAsync(lifetime.Token));
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         lifetime.Cancel();
@@ -34,8 +46,20 @@ public partial class MainWindow : Window
     private async void CheckButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.CheckAsync(lifetime.Token));
 
-    private async void InstallButton_Click(object sender, RoutedEventArgs e) =>
-        await RunUiAsync(() => viewModel.InstallAsync(lifetime.Token));
+    private async void InstallButton_Click(object sender, RoutedEventArgs e)
+    {
+        var confirmed = MessageBox.Show(
+            this,
+            "将从 OpenAI 官方地址下载并安装 Codex。接下来可能出现 Windows 管理员授权窗口；请在那里输入 Windows 管理员密码，它不是 DeepSeek API Key。\n\n继续安装吗？",
+            "安装官方 Codex",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+        if (confirmed == MessageBoxResult.Yes)
+        {
+            await RunUiAsync(() => viewModel.InstallAsync(lifetime.Token));
+        }
+    }
 
     private async void PortableInstallButton_Click(object sender, RoutedEventArgs e)
     {
@@ -54,12 +78,17 @@ public partial class MainWindow : Window
     private async void ConfigureButton_Click(object sender, RoutedEventArgs e)
     {
         var key = ApiKeyBox.Password;
-        ApiKeyBox.Clear();
-        await RunUiAsync(() => viewModel.ConfigureAsync(key, lifetime.Token));
+        var result = await RunUiAsync(() => viewModel.ConfigureAsync(key, lifetime.Token));
+        if (result?.IsSuccess == true)
+        {
+            ApiKeyBox.Clear();
+        }
     }
 
     private async void LaunchButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.LaunchAsync(lifetime.Token));
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
     private void OpenLink_Click(object sender, RoutedEventArgs e)
     {
@@ -69,18 +98,20 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunUiAsync(Func<Task<OperationResult<Unit>>> operation)
+    private async Task<OperationResult<Unit>?> RunUiAsync(Func<Task<OperationResult<Unit>>> operation)
     {
         try
         {
-            await operation();
+            return await operation();
         }
         catch (OperationCanceledException)
         {
+            return null;
         }
         catch (Exception)
         {
             MessageBox.Show(this, "操作遇到未预期错误。请重新打开程序后重试。", "安装助手", MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
         }
     }
 }
