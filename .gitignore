@@ -1,0 +1,11 @@
+.DS_Store
+.tools/
+.vs/
+.idea/
+bin/
+obj/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.log
