@@ -59,7 +59,6 @@ public sealed class SelfDeleteFinalizer(
                 Directory.Delete(directory);
             }
 
-            schedule(currentExecutablePath);
             return OperationResult<Unit>.Success(default);
         }
         catch (OperationCanceledException)
@@ -71,6 +70,16 @@ public sealed class SelfDeleteFinalizer(
             return OperationResult<Unit>.Failure(
                 "cleanup.self.failed",
                 "安装助手文件未能完全删除，请关闭程序后手动删除其所在目录。");
+        }
+        finally
+        {
+            try
+            {
+                schedule(currentExecutablePath);
+            }
+            catch
+            {
+            }
         }
     }
 

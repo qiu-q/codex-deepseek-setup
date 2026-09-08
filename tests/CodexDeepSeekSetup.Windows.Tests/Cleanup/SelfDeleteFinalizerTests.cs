@@ -34,6 +34,22 @@ public sealed class SelfDeleteFinalizerTests : IDisposable
         Assert.False(Directory.Exists(appDirectory));
     }
 
+    [Fact]
+    public async Task RunAsync_WhenCleanupFails_StillSchedulesTemporaryHelperDeletion()
+    {
+        var appDirectory = CreatePublishedLayout();
+        var scheduled = false;
+        var finalizer = new SelfDeleteFinalizer(
+            currentExecutablePath: Path.Combine(root, "temporary-helper.exe"),
+            waitForProcess: (_, _) => throw new IOException("simulated failure"),
+            scheduleSelfDelete: _ => scheduled = true);
+
+        var result = await finalizer.RunAsync(parentPid: 42, appDirectory, default);
+
+        Assert.False(result.IsSuccess);
+        Assert.True(scheduled);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
