@@ -104,10 +104,10 @@
                                     <TextBlock Text="{Binding CurrentFileName}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Grid.Column="1" Text="{Binding TransferSummary}" Margin="16,0,0,0" Foreground="#475569" />
                                 </Grid>
-                                <ProgressBar x:Name="FileProgressBar" Height="9" Minimum="0" Maximum="100" Value="{Binding FileProgress}" IsIndeterminate="{Binding IsFileProgressIndeterminate}" Margin="0,7,0,12" />
+                                <ProgressBar x:Name="FileProgressBar" Height="9" Minimum="0" Maximum="100" Value="{Binding FileProgress, Mode=OneWay}" IsIndeterminate="{Binding IsFileProgressIndeterminate, Mode=OneWay}" Margin="0,7,0,12" />
                                 <DockPanel LastChildFill="True">
                                     <TextBlock DockPanel.Dock="Right" Text="总体进度" Foreground="#64748B" Margin="12,0,0,0" />
-                                    <ProgressBar x:Name="OverallProgressBar" Height="7" Minimum="0" Maximum="100" Value="{Binding OverallProgress}" />
+                                    <ProgressBar x:Name="OverallProgressBar" Height="7" Minimum="0" Maximum="100" Value="{Binding OverallProgress, Mode=OneWay}" />
                                 </DockPanel>
                                 <Expander Header="查看详细记录（最多保留 200 条）" Margin="0,12,0,0">
                                     <ListBox x:Name="ProgressLogList" ItemsSource="{Binding ProgressEntries}" MaxHeight="150" Margin="0,8,0,0" FontFamily="Consolas" FontSize="12" BorderBrush="#CBD5E1" />
