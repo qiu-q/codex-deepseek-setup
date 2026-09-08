@@ -27,18 +27,22 @@ public interface IWindowsReadinessService
 }
 
 [SupportedOSPlatform("windows")]
-public sealed class WindowsReadinessService(IProcessRunner processRunner) : IWindowsReadinessService
+public sealed class WindowsReadinessService(
+    IProcessRunner processRunner,
+    Func<long>? freeSystemDriveBytesProvider = null) : IWindowsReadinessService
 {
+    private readonly Func<long> getFreeSystemDriveBytes =
+        freeSystemDriveBytesProvider ?? ReadFreeSystemDriveBytes;
+
     private const string ProbeScript = """
         $os=Get-CimInstance Win32_OperatingSystem
         $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $policy=Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue
         $uac=$policy.EnableLUA
         $filterAdmin=$policy.FilterAdministratorToken
-        $drive=Get-CimInstance Win32_LogicalDisk -Filter (\"DeviceID='\"+$env:SystemDrive+\"'\")
         $services=Get-CimInstance Win32_Service | Where-Object Name -in @('AppXSvc','ClipSVC','LicenseManager','StateRepository') | Select-Object Name,State,StartMode
         $codex=Get-AppxPackage -Name OpenAI.Codex -ErrorAction SilentlyContinue | Where-Object Status -eq 'Ok'
-        [pscustomobject]@{ProductName=$os.Caption;Version=$os.Version;Build=$os.BuildNumber;IsX64=([Environment]::Is64BitOperatingSystem);UserSid=$sid;EnableLua=[int]$uac;FilterAdministratorToken=[int]$filterAdmin;FreeBytes=[long]$drive.FreeSpace;Services=@($services);IsCodexInstalled=[bool]$codex} | ConvertTo-Json -Depth 4 -Compress
+        [pscustomobject]@{ProductName=$os.Caption;Version=$os.Version;Build=$os.BuildNumber;IsX64=([Environment]::Is64BitOperatingSystem);UserSid=$sid;EnableLua=[int]$uac;FilterAdministratorToken=[int]$filterAdmin;Services=@($services);IsCodexInstalled=[bool]$codex} | ConvertTo-Json -Depth 4 -Compress
         """;
 
     public async Task<OperationResult<WindowsReadinessReport>> CheckAsync(CancellationToken cancellationToken)
@@ -77,7 +81,7 @@ public sealed class WindowsReadinessService(IProcessRunner processRunner) : IWin
                 sid.EndsWith("-500", StringComparison.Ordinal),
                 root.GetProperty("EnableLua").GetInt32(),
                 root.GetProperty("FilterAdministratorToken").GetInt32(),
-                root.GetProperty("FreeBytes").GetInt64(),
+                getFreeSystemDriveBytes(),
                 services,
                 root.GetProperty("IsCodexInstalled").GetBoolean(),
                 supported);
@@ -91,5 +95,17 @@ public sealed class WindowsReadinessService(IProcessRunner processRunner) : IWin
         {
             return OperationResult<WindowsReadinessReport>.Failure("readiness.probe.failed", "无法解析 Windows 安装环境。");
         }
+    }
+
+    private static long ReadFreeSystemDriveBytes()
+    {
+        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var systemDriveRoot = Path.GetPathRoot(systemDirectory);
+        if (string.IsNullOrWhiteSpace(systemDriveRoot))
+        {
+            throw new IOException("无法确定 Windows 系统盘。");
+        }
+
+        return new DriveInfo(systemDriveRoot).AvailableFreeSpace;
     }
 }

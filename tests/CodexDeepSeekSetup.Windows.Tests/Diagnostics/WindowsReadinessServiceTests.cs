@@ -28,6 +28,23 @@ public sealed class WindowsReadinessServiceTests
         Assert.Equal(expected, result.Value!.IsSupported);
     }
 
+    [Fact]
+    public async Task CheckAsync_UsesSystemDriveSpaceProviderWhenProbeCannotReadDrive()
+    {
+        const long actualFreeBytes = 4_423_680_000;
+        const string json = """
+            {"ProductName":"Windows 10 Pro","Version":"10.0.19045","Build":"19045","IsX64":true,"UserSid":"S-1-5-21-1-2-3-1001","EnableLua":1,"FilterAdministratorToken":0,"FreeBytes":0,"Services":[],"IsCodexInstalled":false}
+            """;
+        var service = new WindowsReadinessService(
+            new FixedProcessRunner(json),
+            () => actualFreeBytes);
+
+        var result = await service.CheckAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(actualFreeBytes, result.Value!.FreeSystemDriveBytes);
+    }
+
     private sealed class FixedProcessRunner(string output) : IProcessRunner
     {
         public Task<ProcessResult> RunAsync(
