@@ -17,6 +17,8 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.IsConfigureStep);
         Assert.False(viewModel.IsCompleteStep);
         Assert.Equal("准备安装 Codex", viewModel.StatusMessage);
+        Assert.True(viewModel.CanDownload);
+        Assert.False(viewModel.CanInstall);
     }
 
     [Fact]
@@ -32,17 +34,67 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public async Task InstallAsync_OnSuccess_AdvancesAndClearsProgress()
+    public async Task DownloadAsync_OnSuccess_EnablesInstallWithoutAdvancingWizard()
     {
         var viewModel = new MainWindowViewModel(new FakeActions());
         await viewModel.InitializeAsync(default);
 
-        var result = await viewModel.InstallAsync(default);
+        var result = await viewModel.DownloadAsync(default);
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.True(viewModel.IsConfigureStep);
+        Assert.True(viewModel.IsInstallStep);
+        Assert.Equal(CodexInstallStage.ReadyToInstall, viewModel.InstallStage);
+        Assert.True(viewModel.CanInstall);
+        Assert.True(viewModel.CanDownload);
         Assert.False(viewModel.IsProgressVisible);
         Assert.Equal(0, viewModel.Progress);
+    }
+
+    [Fact]
+    public async Task DownloadAsync_OnFailure_DoesNotEnableInstall()
+    {
+        var actions = new FakeActions { PrepareSucceeds = false };
+        var viewModel = new MainWindowViewModel(actions);
+
+        var result = await viewModel.DownloadAsync(default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CodexInstallStage.NotDownloaded, viewModel.InstallStage);
+        Assert.False(viewModel.CanInstall);
+        Assert.True(viewModel.CanDownload);
+    }
+
+    [Fact]
+    public async Task InstallAsync_OnFailure_KeepsPreparedPayloadForDirectRetry()
+    {
+        var actions = new FakeActions { InstallFailuresRemaining = 1 };
+        var viewModel = new MainWindowViewModel(actions);
+        await viewModel.DownloadAsync(default);
+
+        var first = await viewModel.InstallAsync(default);
+        var second = await viewModel.InstallAsync(default);
+
+        Assert.False(first.IsSuccess);
+        Assert.True(second.IsSuccess, second.ErrorMessage);
+        Assert.Equal(1, actions.PrepareCallCount);
+        Assert.Equal(2, actions.InstallCallCount);
+        Assert.True(viewModel.IsConfigureStep);
+    }
+
+    [Fact]
+    public async Task InstallAsync_WhenPreparedFilesDisappear_ReturnsToDownloadStage()
+    {
+        var actions = new FakeActions { InstallFailureCode = "payload.not.prepared" };
+        var viewModel = new MainWindowViewModel(actions);
+        await viewModel.DownloadAsync(default);
+
+        var result = await viewModel.InstallAsync(default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CodexInstallStage.NotDownloaded, viewModel.InstallStage);
+        Assert.True(viewModel.CanDownload);
+        Assert.False(viewModel.CanInstall);
+        Assert.False(viewModel.CanUsePortable);
     }
 
     [Fact]
@@ -52,6 +104,7 @@ public sealed class MainWindowViewModelTests
         var actions = new FakeActions { KeySucceeds = false };
         var viewModel = new MainWindowViewModel(actions);
         await viewModel.CheckAsync(default);
+        await viewModel.DownloadAsync(default);
         await viewModel.InstallAsync(default);
 
         var result = await viewModel.ConfigureAsync(key, default);
@@ -78,6 +131,7 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(new FakeActions { LaunchSucceeds = false });
         await viewModel.CheckAsync(default);
+        await viewModel.DownloadAsync(default);
         await viewModel.InstallAsync(default);
         await viewModel.ConfigureAsync("sk-valid12345678", default);
 
@@ -115,8 +169,9 @@ public sealed class MainWindowViewModelTests
     [Fact]
     public async Task InstallPortableAsync_AdvancesAfterPrimaryInstallFails()
     {
-        var actions = new FakeActions { InstallSucceeds = false };
+        var actions = new FakeActions { InstallFailuresRemaining = 1 };
         var viewModel = new MainWindowViewModel(actions);
+        await viewModel.DownloadAsync(default);
         var primaryResult = await viewModel.InstallAsync(default);
 
         var result = await viewModel.InstallPortableAsync(default);
@@ -176,6 +231,7 @@ public sealed class MainWindowViewModelTests
         await viewModel.InitializeAsync(default);
         if (viewModel.IsInstallStep)
         {
+            await viewModel.DownloadAsync(default);
             await viewModel.InstallAsync(default);
         }
         await viewModel.ConfigureAsync("sk-valid12345678", default);
@@ -187,18 +243,37 @@ public sealed class MainWindowViewModelTests
         public bool IsCodexInstalled { get; set; }
         public bool HasInstallLedger { get; set; }
         public bool KeySucceeds { get; init; } = true;
-        public bool InstallSucceeds { get; init; } = true;
+        public bool PrepareSucceeds { get; init; } = true;
+        public int InstallFailuresRemaining { get; set; }
+        public string? InstallFailureCode { get; init; }
         public bool LaunchSucceeds { get; init; } = true;
         public bool CleanupSucceeds { get; init; } = true;
         public bool LaunchWasCalled { get; private set; }
         public bool PortableInstallWasCalled { get; private set; }
         public bool CleanupWasCalled { get; private set; }
+        public int PrepareCallCount { get; private set; }
+        public int InstallCallCount { get; private set; }
         public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
-        public Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+        public Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
+            PrepareCallCount++;
             progress?.Report(new SetupProgress("正在下载 OpenAI 官方文件", 60));
-            if (!InstallSucceeds)
+            if (!PrepareSucceeds)
             {
+                return Task.FromResult(OperationResult<Unit>.Failure("download.network.failed", "官方文件下载失败"));
+            }
+            return Ok();
+        }
+        public Task<OperationResult<Unit>> InstallPreparedCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+        {
+            InstallCallCount++;
+            if (InstallFailureCode is not null)
+            {
+                return Task.FromResult(OperationResult<Unit>.Failure(InstallFailureCode, "已准备文件不存在"));
+            }
+            if (InstallFailuresRemaining > 0)
+            {
+                InstallFailuresRemaining--;
                 return Task.FromResult(OperationResult<Unit>.Failure("install.appx.failed", "官方离线部署失败"));
             }
             IsCodexInstalled = true;
@@ -206,7 +281,7 @@ public sealed class MainWindowViewModelTests
         }
         public Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken) =>
             KeySucceeds ? Ok() : Task.FromResult(OperationResult<Unit>.Failure("key.invalid", "API Key 无效"));
-        public Task<OperationResult<Unit>> InstallPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+        public Task<OperationResult<Unit>> InstallPreparedPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
             PortableInstallWasCalled = true;
             IsCodexInstalled = true;

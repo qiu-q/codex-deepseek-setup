@@ -11,13 +11,23 @@ public enum WizardStep
     Complete
 }
 
+public enum CodexInstallStage
+{
+    NotDownloaded,
+    Downloading,
+    ReadyToInstall,
+    Installing,
+    InstallFailed
+}
+
 public interface IWizardActions
 {
     bool IsCodexInstalled { get; }
     bool HasInstallLedger { get; }
     Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken);
-    Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
-    Task<OperationResult<Unit>> InstallPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> InstallPreparedCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> InstallPreparedPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken);
@@ -32,6 +42,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private bool isProgressVisible;
     private double progress;
     private bool shouldExit;
+    private CodexInstallStage installStage = CodexInstallStage.NotDownloaded;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -83,7 +94,30 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
     public bool IsCompleteStep => CurrentStep == WizardStep.Complete;
 
-    public bool CanInstall => IsInstallStep && !IsBusy;
+    public CodexInstallStage InstallStage
+    {
+        get => installStage;
+        private set
+        {
+            if (Set(ref installStage, value))
+            {
+                RaiseCommandProperties();
+                OnPropertyChanged(nameof(IsDownloading));
+                OnPropertyChanged(nameof(IsInstalling));
+                OnPropertyChanged(nameof(IsReadyToInstall));
+            }
+        }
+    }
+
+    public bool IsDownloading => InstallStage == CodexInstallStage.Downloading;
+
+    public bool IsInstalling => InstallStage == CodexInstallStage.Installing;
+
+    public bool IsReadyToInstall => InstallStage is CodexInstallStage.ReadyToInstall or CodexInstallStage.InstallFailed;
+
+    public bool CanDownload => IsInstallStep && !IsBusy;
+
+    public bool CanInstall => IsInstallStep && !IsBusy && IsReadyToInstall;
 
     public bool CanConfigure => IsConfigureStep && !IsBusy;
 
@@ -157,23 +191,61 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         return result;
     }
 
-    public async Task<OperationResult<Unit>> InstallAsync(CancellationToken cancellationToken)
+    public async Task<OperationResult<Unit>> DownloadAsync(CancellationToken cancellationToken)
     {
         if (CurrentStep != WizardStep.Welcome)
         {
-            return OperationResult<Unit>.Failure("wizard.order", "当前步骤不能安装。");
+            return OperationResult<Unit>.Failure("wizard.order", "当前步骤不能下载。");
         }
 
         IsProgressVisible = true;
         Progress = 0;
+        InstallStage = CodexInstallStage.Downloading;
+        CanUsePortable = false;
         var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
         OperationResult<Unit> result;
         try
         {
             result = await RunAsync(
-                "正在准备安装官方 Codex…",
+                "正在下载并校验 OpenAI 官方文件…",
+                "官方文件已校验，下一步请安装 Codex",
+                token => actions.PrepareCodexAsync(progressReporter, token),
+                cancellationToken);
+        }
+        finally
+        {
+            Progress = 0;
+            IsProgressVisible = false;
+        }
+        if (result.IsSuccess)
+        {
+            InstallStage = CodexInstallStage.ReadyToInstall;
+        }
+        else
+        {
+            InstallStage = CodexInstallStage.NotDownloaded;
+        }
+        return result;
+    }
+
+    public async Task<OperationResult<Unit>> InstallAsync(CancellationToken cancellationToken)
+    {
+        if (CurrentStep != WizardStep.Welcome || !IsReadyToInstall)
+        {
+            return OperationResult<Unit>.Failure("wizard.install.requires_payload", "请先下载并校验官方文件。");
+        }
+
+        IsProgressVisible = true;
+        Progress = 0;
+        InstallStage = CodexInstallStage.Installing;
+        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        OperationResult<Unit> result;
+        try
+        {
+            result = await RunAsync(
+                "正在准备安装 Codex…",
                 "Codex 已安装，下一步请准备 DeepSeek API Key",
-                token => actions.InstallAsync(progressReporter, token),
+                token => actions.InstallPreparedCodexAsync(progressReporter, token),
                 cancellationToken);
         }
         finally
@@ -188,7 +260,11 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         }
         else
         {
-            CanUsePortable = true;
+            var payloadMustBePreparedAgain = result.ErrorCode is "payload.not.prepared" or "payload.revalidation.failed";
+            InstallStage = payloadMustBePreparedAgain
+                ? CodexInstallStage.NotDownloaded
+                : CodexInstallStage.InstallFailed;
+            CanUsePortable = !payloadMustBePreparedAgain;
         }
         return result;
     }
@@ -206,6 +282,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
         IsProgressVisible = true;
         Progress = 0;
+        InstallStage = CodexInstallStage.Installing;
         var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
         OperationResult<Unit> result;
         try
@@ -213,7 +290,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             result = await RunAsync(
                 "正在准备实验性 Codex…",
                 "Codex 已解包，下一步请准备 DeepSeek API Key",
-                token => actions.InstallPortableAsync(progressReporter, token),
+                token => actions.InstallPreparedPortableAsync(progressReporter, token),
                 cancellationToken);
         }
         finally
@@ -226,6 +303,14 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             CanUsePortable = false;
             CurrentStep = WizardStep.DeepSeek;
             RaiseActionMetadata();
+        }
+        else
+        {
+            var payloadMustBePreparedAgain = result.ErrorCode is "payload.not.prepared" or "payload.revalidation.failed";
+            InstallStage = payloadMustBePreparedAgain
+                ? CodexInstallStage.NotDownloaded
+                : CodexInstallStage.InstallFailed;
+            CanUsePortable = !payloadMustBePreparedAgain;
         }
         return result;
     }
@@ -319,6 +404,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private void RaiseCommandProperties()
     {
         OnPropertyChanged(nameof(CanInstall));
+        OnPropertyChanged(nameof(CanDownload));
         OnPropertyChanged(nameof(CanConfigure));
         OnPropertyChanged(nameof(CanLaunch));
         OnPropertyChanged(nameof(CanRunPortable));

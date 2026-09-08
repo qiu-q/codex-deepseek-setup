@@ -66,6 +66,26 @@ public sealed class OfficialDownloadServiceTests : IDisposable
         Assert.Equal("download.origin.rejected", result.ErrorCode);
     }
 
+    [Fact]
+    public async Task DownloadCodexPayloadAsync_CompletesMsixProgressBeforeLicenseProgressStarts()
+    {
+        var service = new OfficialDownloadService(
+            new HttpClient(new ProgressOrderingHandler()),
+            new OfficialOriginPolicy());
+        var files = new List<string>();
+
+        var result = await service.DownloadCodexPayloadAsync(
+            root,
+            new InlineProgress<DownloadProgress>(item => files.Add(item.FileName)),
+            default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        var lastMsix = files.FindLastIndex(name => name == "ChatGPT-x64.msix");
+        var firstLicense = files.FindIndex(name => name == "ChatGPT-License.xml");
+        Assert.True(lastMsix >= 0);
+        Assert.True(firstLicense > lastMsix, $"Progress order was: {string.Join(", ", files)}");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
@@ -114,5 +134,37 @@ public sealed class OfficialDownloadServiceTests : IDisposable
                 RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://evil.example/payload"),
                 Content = new StringContent("untrusted")
             });
+    }
+
+    private sealed class ProgressOrderingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var isMsix = request.RequestUri!.AbsolutePath.EndsWith(".msix", StringComparison.Ordinal);
+            var content = new ByteArrayContent(new byte[isMsix ? 200_000 : 10]);
+            if (isMsix)
+            {
+                content = new DelayedByteArrayContent(new byte[200_000]);
+            }
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = content
+            });
+        }
+    }
+
+    private sealed class DelayedByteArrayContent(byte[] bytes) : ByteArrayContent(bytes)
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            await Task.Delay(75);
+            await base.SerializeToStreamAsync(stream, context);
+        }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 }

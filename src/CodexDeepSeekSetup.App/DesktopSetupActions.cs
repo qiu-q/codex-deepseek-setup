@@ -23,6 +23,7 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly OfficialDownloadService downloader;
     private readonly IWindowsReadinessService readiness;
     private readonly ICodexPackageManager packageManager;
+    private readonly CodexPackageVerifier payloadVerifier;
     private readonly PortableCodexInstaller portableInstaller;
     private readonly CodexCliBootstrapper cliBootstrapper;
     private readonly DeepSeekClient deepSeek;
@@ -48,6 +49,7 @@ public sealed class DesktopSetupActions : IWizardActions
         OfficialDownloadService downloader,
         IWindowsReadinessService readiness,
         ICodexPackageManager packageManager,
+        CodexPackageVerifier payloadVerifier,
         PortableCodexInstaller portableInstaller,
         CodexCliBootstrapper cliBootstrapper,
         DeepSeekClient deepSeek,
@@ -64,6 +66,7 @@ public sealed class DesktopSetupActions : IWizardActions
         this.downloader = downloader;
         this.readiness = readiness;
         this.packageManager = packageManager;
+        this.payloadVerifier = payloadVerifier;
         this.portableInstaller = portableInstaller;
         this.cliBootstrapper = cliBootstrapper;
         this.deepSeek = deepSeek;
@@ -100,6 +103,7 @@ public sealed class DesktopSetupActions : IWizardActions
             new OfficialDownloadService(new HttpClient { Timeout = TimeSpan.FromMinutes(30) }, new OfficialOriginPolicy()),
             new WindowsReadinessService(runner),
             new CodexPackageManager(verifier, runner, elevatedExecutable, requestDirectory),
+            verifier,
             new PortableCodexInstaller(verifier, runner),
             new CodexCliBootstrapper(runner),
             new DeepSeekClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }),
@@ -172,32 +176,87 @@ public sealed class DesktopSetupActions : IWizardActions
         return OperationResult<Unit>.Success(default);
     }
 
-    public async Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+    public async Task<OperationResult<Unit>> PrepareCodexAsync(
+        IProgress<SetupProgress>? progress,
+        CancellationToken cancellationToken)
     {
-        progress?.Report(new SetupProgress("正在检查 Windows 和安装条件…"));
+        payload = null;
+        progress?.Report(new SetupProgress(
+            "正在检查 Windows 和安装条件",
+            2,
+            SetupPhase.Check,
+            "正在检查系统版本、账户模式、AppX 服务和系统盘空间。"));
         var check = await CheckAsync(cancellationToken).ConfigureAwait(false);
         if (!check.IsSuccess)
         {
             return check;
         }
 
-        progress?.Report(new SetupProgress("正在下载 OpenAI 官方 Codex 文件…", 0));
+        progress?.Report(new SetupProgress(
+            "正在准备 OpenAI 官方文件",
+            8,
+            SetupPhase.Download,
+            "将依次准备 ChatGPT-x64.msix 和 ChatGPT-License.xml。"));
         var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
         if (!preparedPayload.IsSuccess)
         {
             return Failure(preparedPayload.ErrorCode!, preparedPayload.ErrorMessage!);
         }
-        payload = preparedPayload.Value!;
+        var candidate = preparedPayload.Value!;
 
-        progress?.Report(new SetupProgress("正在校验官方签名；随后会请求 Windows 管理员授权（不是 API Key）…"));
-        var installed = await packageManager.InstallAsync(payload.MsixPath, payload.LicensePath, cancellationToken)
+        progress?.Report(new SetupProgress(
+            "正在校验官方安装文件",
+            90,
+            SetupPhase.Verify,
+            "正在检查 MSIX 包身份、x64 架构、离线许可证和 Windows 数字签名。"));
+        var verified = await payloadVerifier.VerifyAsync(candidate.MsixPath, candidate.LicensePath, cancellationToken)
+            .ConfigureAwait(false);
+        if (!verified.IsSuccess)
+        {
+            return Failure(verified.ErrorCode!, verified.ErrorMessage!);
+        }
+
+        payload = candidate;
+        progress?.Report(new SetupProgress(
+            "官方文件已下载并校验",
+            100,
+            SetupPhase.Complete,
+            $"已验证 OpenAI.Codex {verified.Value!.Version} x64，可以开始安装。"));
+        return OperationResult<Unit>.Success(default);
+    }
+
+    public async Task<OperationResult<Unit>> InstallPreparedCodexAsync(
+        IProgress<SetupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        var prepared = await RevalidatePreparedPayloadAsync(progress, cancellationToken).ConfigureAwait(false);
+        if (!prepared.IsSuccess)
+        {
+            return prepared;
+        }
+
+        progress?.Report(new SetupProgress(
+            "等待 Windows 管理员授权",
+            20,
+            SetupPhase.Authorization,
+            "接下来的系统弹窗要求的是 Windows 管理员密码，不是 DeepSeek API Key。"));
+        var installed = await packageManager.InstallAsync(payload!.MsixPath, payload.LicensePath, cancellationToken)
             .ConfigureAwait(false);
         if (!installed.IsSuccess)
         {
             return installed;
         }
 
-        progress?.Report(new SetupProgress("管理员授权完成，正在为当前用户注册 Codex…"));
+        progress?.Report(new SetupProgress(
+            "Codex 系统包已部署",
+            55,
+            SetupPhase.Deploy,
+            "离线 MSIX 和许可证已写入 Windows 应用部署服务。"));
+        progress?.Report(new SetupProgress(
+            "正在为当前用户注册 Codex",
+            62,
+            SetupPhase.Register,
+            "这一步会建立开始菜单包身份和当前用户的应用注册。"));
         var registered = await packageManager.RegisterCurrentUserAsync(payload.MsixPath, cancellationToken)
             .ConfigureAwait(false);
         if (!registered.IsSuccess)
@@ -205,7 +264,11 @@ public sealed class DesktopSetupActions : IWizardActions
             return registered;
         }
 
-        progress?.Report(new SetupProgress("正在准备 Codex CLI…"));
+        progress?.Report(new SetupProgress(
+            "正在准备 Codex CLI",
+            78,
+            SetupPhase.Cli,
+            "正在定位官方 CLI；必要时复制同版本配套程序到当前用户目录。"));
         var cli = await cliBootstrapper.PrepareAsync(cancellationToken).ConfigureAwait(false);
         if (!cli.IsSuccess)
         {
@@ -214,16 +277,26 @@ public sealed class DesktopSetupActions : IWizardActions
 
         IsCodexInstalled = true;
         portableInstall = null;
+        progress?.Report(new SetupProgress(
+            "正在保存安装记录",
+            92,
+            SetupPhase.SaveState,
+            "只保存安装来源和清理所需路径，不保存 API Key。"));
         var stateSaved = await SaveInstallStateAsync("official", cli.Value!, null, cancellationToken)
             .ConfigureAwait(false);
         if (!stateSaved.IsSuccess)
         {
             return stateSaved;
         }
+        progress?.Report(new SetupProgress(
+            "Codex 安装完成",
+            100,
+            SetupPhase.Complete,
+            "系统部署、当前用户注册和 CLI 准备均已完成。"));
         return OperationResult<Unit>.Success(default);
     }
 
-    public async Task<OperationResult<Unit>> InstallPortableAsync(
+    public async Task<OperationResult<Unit>> InstallPreparedPortableAsync(
         IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -232,7 +305,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("windows.required", "此安装助手只能在 Windows 上运行。");
         }
 
-        progress?.Report(new SetupProgress("正在检查实验模式运行条件…"));
+        progress?.Report(new SetupProgress("正在检查实验模式运行条件", 5, SetupPhase.Check));
         var readinessResult = await readiness.CheckAsync(cancellationToken).ConfigureAwait(false);
         if (!readinessResult.IsSuccess)
         {
@@ -248,19 +321,18 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("windows.disk.low", "实验模式需要系统盘至少 4 GB 可用空间。");
         }
 
-        progress?.Report(new SetupProgress("正在下载 OpenAI 官方 Codex 文件…", 0));
-        var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
+        var preparedPayload = await RevalidatePreparedPayloadAsync(progress, cancellationToken).ConfigureAwait(false);
         if (!preparedPayload.IsSuccess)
         {
             return Failure(preparedPayload.ErrorCode!, preparedPayload.ErrorMessage!);
         }
-        payload = preparedPayload.Value!;
 
         var destination = GetPortableRoot();
-        progress?.Report(new SetupProgress("正在校验官方签名并解压 Codex…"));
+        var currentPayload = payload!;
+        progress?.Report(new SetupProgress("正在解压已校验的 Codex", 35, SetupPhase.Deploy));
         var installed = await portableInstaller.InstallAsync(
-            payload.MsixPath,
-            payload.LicensePath,
+            currentPayload.MsixPath,
+            currentPayload.LicensePath,
             destination,
             cancellationToken).ConfigureAwait(false);
         if (!installed.IsSuccess)
@@ -272,6 +344,7 @@ public sealed class DesktopSetupActions : IWizardActions
         Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.User);
         Environment.SetEnvironmentVariable("CODEX_CLI_PATH", portableInstall.CliPath, EnvironmentVariableTarget.Process);
         IsCodexInstalled = true;
+        progress?.Report(new SetupProgress("正在保存实验模式记录", 90, SetupPhase.SaveState));
         var stateSaved = await SaveInstallStateAsync(
                 "portable",
                 portableInstall.CliPath,
@@ -282,6 +355,7 @@ public sealed class DesktopSetupActions : IWizardActions
         {
             return stateSaved;
         }
+        progress?.Report(new SetupProgress("实验性 Codex 已准备完成", 100, SetupPhase.Complete));
         return OperationResult<Unit>.Success(default);
     }
 
@@ -493,6 +567,32 @@ public sealed class DesktopSetupActions : IWizardActions
         }
     }
 
+    private async Task<OperationResult<Unit>> RevalidatePreparedPayloadAsync(
+        IProgress<SetupProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (payload is null || !File.Exists(payload.MsixPath) || !File.Exists(payload.LicensePath))
+        {
+            payload = null;
+            return Failure("payload.not.prepared", "已准备的官方文件不存在，请重新下载并校验。");
+        }
+
+        progress?.Report(new SetupProgress(
+            "正在安装前重新校验文件",
+            8,
+            SetupPhase.Verify,
+            "正在确认下载完成后文件未被删除或替换。"));
+        var verified = await payloadVerifier.VerifyAsync(payload.MsixPath, payload.LicensePath, cancellationToken)
+            .ConfigureAwait(false);
+        if (!verified.IsSuccess)
+        {
+            payload = null;
+            return Failure("payload.revalidation.failed", "官方文件在安装前校验失败，请重新下载。");
+        }
+
+        return OperationResult<Unit>.Success(default);
+    }
+
     private async Task<OperationResult<CodexPayload>> PreparePayloadAsync(
         IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
@@ -505,6 +605,11 @@ public sealed class DesktopSetupActions : IWizardActions
         var adjacent = FindAdjacentPayload();
         if (adjacent is not null)
         {
+            progress?.Report(new SetupProgress(
+                "已找到内部版本地官方文件",
+                82,
+                SetupPhase.Download,
+                "将跳过网络下载，但仍会执行完整包身份和签名校验。"));
             return OperationResult<CodexPayload>.Success(adjacent);
         }
 
@@ -514,12 +619,23 @@ public sealed class DesktopSetupActions : IWizardActions
             "Downloads");
         var downloadProgress = new Progress<DownloadProgress>(item =>
         {
-            if (item.TotalBytes is > 0)
-            {
-                progress?.Report(new SetupProgress(
-                    $"正在下载 OpenAI 官方文件：{Path.GetFileName(item.FileName)}",
-                    Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100)));
-            }
+            var filePercent = item.TotalBytes is > 0
+                ? Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100)
+                : (double?)null;
+            var overall = string.Equals(item.FileName, "ChatGPT-x64.msix", StringComparison.OrdinalIgnoreCase)
+                ? 10 + (filePercent ?? 0) * 0.68
+                : 78 + (filePercent ?? 0) * 0.08;
+            progress?.Report(new SetupProgress(
+                $"正在下载 {Path.GetFileName(item.FileName)}",
+                Math.Clamp(overall, 0, 86),
+                SetupPhase.Download,
+                string.Equals(item.FileName, "ChatGPT-x64.msix", StringComparison.OrdinalIgnoreCase)
+                    ? "正在接收 OpenAI 官方 Codex x64 安装包。"
+                    : "正在接收与安装包匹配的官方离线许可证。",
+                item.FileName,
+                item.BytesDownloaded,
+                item.TotalBytes,
+                item.TotalBytes is null));
         });
         return await downloader.DownloadCodexPayloadAsync(cache, downloadProgress, cancellationToken)
             .ConfigureAwait(false);

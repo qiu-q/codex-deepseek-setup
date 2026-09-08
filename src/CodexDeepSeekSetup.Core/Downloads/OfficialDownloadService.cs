@@ -27,9 +27,8 @@ public sealed class OfficialDownloadService(HttpClient http, OfficialOriginPolic
         var licensePath = Path.Combine(cacheDirectory, "ChatGPT-License.xml");
         try
         {
-            await Task.WhenAll(
-                DownloadFileAsync(msixUri, msixPath, progress, cancellationToken),
-                DownloadFileAsync(licenseUri, licensePath, progress, cancellationToken)).ConfigureAwait(false);
+            await DownloadFileAsync(msixUri, msixPath, progress, cancellationToken).ConfigureAwait(false);
+            await DownloadFileAsync(licenseUri, licensePath, progress, cancellationToken).ConfigureAwait(false);
             return OperationResult<CodexPayload>.Success(new CodexPayload(msixPath, licensePath));
         }
         catch (OperationCanceledException)
