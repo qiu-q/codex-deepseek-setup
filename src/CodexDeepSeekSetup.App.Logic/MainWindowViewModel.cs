@@ -15,8 +15,8 @@ public interface IWizardActions
 {
     bool IsCodexInstalled { get; }
     Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken);
-    Task<OperationResult<Unit>> InstallAsync(IProgress<double>? progress, CancellationToken cancellationToken);
-    Task<OperationResult<Unit>> InstallPortableAsync(IProgress<double>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> InstallPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken);
 }
@@ -27,6 +27,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     private string statusMessage = "准备检查这台电脑";
     private bool isBusy;
     private bool canUsePortable;
+    private bool isProgressVisible;
     private double progress;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -34,7 +35,13 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     public WizardStep CurrentStep
     {
         get => currentStep;
-        private set => Set(ref currentStep, value);
+        private set
+        {
+            if (Set(ref currentStep, value))
+            {
+                RaiseStepProperties();
+            }
+        }
     }
 
     public string StatusMessage
@@ -46,19 +53,76 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
     public bool IsBusy
     {
         get => isBusy;
-        private set => Set(ref isBusy, value);
+        private set
+        {
+            if (Set(ref isBusy, value))
+            {
+                RaiseCommandProperties();
+            }
+        }
     }
 
     public bool CanUsePortable
     {
         get => canUsePortable;
-        private set => Set(ref canUsePortable, value);
+        private set
+        {
+            if (Set(ref canUsePortable, value))
+            {
+                OnPropertyChanged(nameof(CanRunPortable));
+            }
+        }
+    }
+
+    public bool IsInstallStep => CurrentStep == WizardStep.Welcome;
+
+    public bool IsConfigureStep => CurrentStep == WizardStep.DeepSeek;
+
+    public bool IsCompleteStep => CurrentStep == WizardStep.Complete;
+
+    public bool CanInstall => IsInstallStep && !IsBusy;
+
+    public bool CanConfigure => IsConfigureStep && !IsBusy;
+
+    public bool CanLaunch => IsCompleteStep && !IsBusy;
+
+    public bool CanRunPortable => CanUsePortable && CanInstall;
+
+    public bool IsProgressVisible
+    {
+        get => isProgressVisible;
+        private set => Set(ref isProgressVisible, value);
     }
 
     public double Progress
     {
         get => progress;
         private set => Set(ref progress, value);
+    }
+
+    public async Task<OperationResult<Unit>> InitializeAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunAsync(
+            "正在检查 Windows 和 Codex…",
+            "准备安装 Codex",
+            actions.CheckAsync,
+            cancellationToken);
+        if (!result.IsSuccess)
+        {
+            return result;
+        }
+
+        if (actions.IsCodexInstalled)
+        {
+            CurrentStep = WizardStep.DeepSeek;
+            StatusMessage = "Codex 已安装，下一步请准备 DeepSeek API Key";
+        }
+        else
+        {
+            CurrentStep = WizardStep.Welcome;
+            StatusMessage = "准备安装 Codex";
+        }
+        return result;
     }
 
     public async Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken)
@@ -79,12 +143,23 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             return OperationResult<Unit>.Failure("wizard.order", "当前步骤不能安装。");
         }
 
-        var progressReporter = new Progress<double>(value => Progress = value);
-        var result = await RunAsync(
-            "正在下载并安装官方 Codex…",
-            "Codex 已安装，请创建并填写 DeepSeek API Key",
-            token => actions.InstallAsync(progressReporter, token),
-            cancellationToken);
+        IsProgressVisible = true;
+        Progress = 0;
+        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        OperationResult<Unit> result;
+        try
+        {
+            result = await RunAsync(
+                "正在准备安装官方 Codex…",
+                "Codex 已安装，下一步请准备 DeepSeek API Key",
+                token => actions.InstallAsync(progressReporter, token),
+                cancellationToken);
+        }
+        finally
+        {
+            Progress = 0;
+            IsProgressVisible = false;
+        }
         if (result.IsSuccess)
         {
             CurrentStep = WizardStep.DeepSeek;
@@ -107,12 +182,23 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
             return OperationResult<Unit>.Failure("wizard.order", "当前步骤不能安装。");
         }
 
-        var progressReporter = new Progress<double>(value => Progress = value);
-        var result = await RunAsync(
-            "正在校验并解包官方 Codex（实验模式）…",
-            "实验性 Codex 目录已生成，请创建并填写 DeepSeek API Key",
-            token => actions.InstallPortableAsync(progressReporter, token),
-            cancellationToken);
+        IsProgressVisible = true;
+        Progress = 0;
+        var progressReporter = new InlineProgress<SetupProgress>(ApplyProgress);
+        OperationResult<Unit> result;
+        try
+        {
+            result = await RunAsync(
+                "正在准备实验性 Codex…",
+                "Codex 已解包，下一步请准备 DeepSeek API Key",
+                token => actions.InstallPortableAsync(progressReporter, token),
+                cancellationToken);
+        }
+        finally
+        {
+            Progress = 0;
+            IsProgressVisible = false;
+        }
         if (result.IsSuccess)
         {
             CanUsePortable = false;
@@ -142,7 +228,7 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
 
     public Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken) =>
         CurrentStep == WizardStep.Complete
-            ? RunAsync("正在启动并检查 Codex 窗口…", "Codex 已成功显示窗口", actions.LaunchAsync, cancellationToken)
+            ? RunAsync("正在启动并检查 Codex 窗口…", "Codex 已启动", actions.LaunchAsync, cancellationToken)
             : Task.FromResult(OperationResult<Unit>.Failure("wizard.order", "请先验证 API Key 并完成配置。"));
 
     private async Task<OperationResult<Unit>> RunAsync(
@@ -170,14 +256,48 @@ public sealed class MainWindowViewModel(IWizardActions actions) : INotifyPropert
         }
     }
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    private void ApplyProgress(SetupProgress update)
+    {
+        StatusMessage = update.Message;
+        if (update.Percent is double percent)
+        {
+            Progress = Math.Clamp(percent, 0, 100);
+        }
+    }
+
+    private void RaiseStepProperties()
+    {
+        OnPropertyChanged(nameof(IsInstallStep));
+        OnPropertyChanged(nameof(IsConfigureStep));
+        OnPropertyChanged(nameof(IsCompleteStep));
+        RaiseCommandProperties();
+    }
+
+    private void RaiseCommandProperties()
+    {
+        OnPropertyChanged(nameof(CanInstall));
+        OnPropertyChanged(nameof(CanConfigure));
+        OnPropertyChanged(nameof(CanLaunch));
+        OnPropertyChanged(nameof(CanRunPortable));
+    }
+
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
         {
-            return;
+            return false;
         }
 
         field = value;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    private void OnPropertyChanged(string? propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 }

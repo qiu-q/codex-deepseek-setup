@@ -160,14 +160,16 @@ public sealed class DesktopSetupActions : IWizardActions
         return OperationResult<Unit>.Success(default);
     }
 
-    public async Task<OperationResult<Unit>> InstallAsync(IProgress<double>? progress, CancellationToken cancellationToken)
+    public async Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
+        progress?.Report(new SetupProgress("正在检查 Windows 和安装条件…"));
         var check = await CheckAsync(cancellationToken).ConfigureAwait(false);
         if (!check.IsSuccess)
         {
             return check;
         }
 
+        progress?.Report(new SetupProgress("正在下载 OpenAI 官方 Codex 文件…", 0));
         var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
         if (!preparedPayload.IsSuccess)
         {
@@ -175,6 +177,7 @@ public sealed class DesktopSetupActions : IWizardActions
         }
         payload = preparedPayload.Value!;
 
+        progress?.Report(new SetupProgress("正在校验官方签名；随后会请求 Windows 管理员授权（不是 API Key）…"));
         var installed = await packageManager.InstallAsync(payload.MsixPath, payload.LicensePath, cancellationToken)
             .ConfigureAwait(false);
         if (!installed.IsSuccess)
@@ -182,6 +185,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return installed;
         }
 
+        progress?.Report(new SetupProgress("管理员授权完成，正在为当前用户注册 Codex…"));
         var registered = await packageManager.RegisterCurrentUserAsync(payload.MsixPath, cancellationToken)
             .ConfigureAwait(false);
         if (!registered.IsSuccess)
@@ -189,6 +193,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return registered;
         }
 
+        progress?.Report(new SetupProgress("正在准备 Codex CLI…"));
         var cli = await cliBootstrapper.PrepareAsync(cancellationToken).ConfigureAwait(false);
         if (!cli.IsSuccess)
         {
@@ -207,7 +212,7 @@ public sealed class DesktopSetupActions : IWizardActions
     }
 
     public async Task<OperationResult<Unit>> InstallPortableAsync(
-        IProgress<double>? progress,
+        IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -215,6 +220,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("windows.required", "此安装助手只能在 Windows 上运行。");
         }
 
+        progress?.Report(new SetupProgress("正在检查实验模式运行条件…"));
         var readinessResult = await readiness.CheckAsync(cancellationToken).ConfigureAwait(false);
         if (!readinessResult.IsSuccess)
         {
@@ -230,6 +236,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("windows.disk.low", "实验模式需要系统盘至少 4 GB 可用空间。");
         }
 
+        progress?.Report(new SetupProgress("正在下载 OpenAI 官方 Codex 文件…", 0));
         var preparedPayload = await PreparePayloadAsync(progress, cancellationToken).ConfigureAwait(false);
         if (!preparedPayload.IsSuccess)
         {
@@ -238,6 +245,7 @@ public sealed class DesktopSetupActions : IWizardActions
         payload = preparedPayload.Value!;
 
         var destination = GetPortableRoot();
+        progress?.Report(new SetupProgress("正在校验官方签名并解压 Codex…"));
         var installed = await portableInstaller.InstallAsync(
             payload.MsixPath,
             payload.LicensePath,
@@ -410,7 +418,7 @@ public sealed class DesktopSetupActions : IWizardActions
             : LaunchPortableAsync(portableInstall, cancellationToken);
 
     private async Task<OperationResult<CodexPayload>> PreparePayloadAsync(
-        IProgress<double>? progress,
+        IProgress<SetupProgress>? progress,
         CancellationToken cancellationToken)
     {
         if (payload is not null)
@@ -432,7 +440,9 @@ public sealed class DesktopSetupActions : IWizardActions
         {
             if (item.TotalBytes is > 0)
             {
-                progress?.Report(Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100));
+                progress?.Report(new SetupProgress(
+                    $"正在下载 OpenAI 官方文件：{Path.GetFileName(item.FileName)}",
+                    Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100)));
             }
         });
         return await downloader.DownloadCodexPayloadAsync(cache, downloadProgress, cancellationToken)

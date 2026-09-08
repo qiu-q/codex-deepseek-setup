@@ -6,6 +6,46 @@ namespace CodexDeepSeekSetup.App.Tests.ViewModels;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
+    public async Task InitializeAsync_WhenCodexIsMissing_ShowsOnlyInstallStep()
+    {
+        var viewModel = new MainWindowViewModel(new FakeActions());
+
+        var result = await viewModel.InitializeAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(viewModel.IsInstallStep);
+        Assert.False(viewModel.IsConfigureStep);
+        Assert.False(viewModel.IsCompleteStep);
+        Assert.Equal("准备安装 Codex", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenCodexExists_AdvancesToConfigureStep()
+    {
+        var viewModel = new MainWindowViewModel(new FakeActions { IsCodexInstalled = true });
+
+        var result = await viewModel.InitializeAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(viewModel.IsConfigureStep);
+        Assert.Equal("Codex 已安装，下一步请准备 DeepSeek API Key", viewModel.StatusMessage);
+    }
+
+    [Fact]
+    public async Task InstallAsync_OnSuccess_AdvancesAndClearsProgress()
+    {
+        var viewModel = new MainWindowViewModel(new FakeActions());
+        await viewModel.InitializeAsync(default);
+
+        var result = await viewModel.InstallAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(viewModel.IsConfigureStep);
+        Assert.False(viewModel.IsProgressVisible);
+        Assert.Equal(0, viewModel.Progress);
+    }
+
+    [Fact]
     public async Task InvalidKey_DoesNotAdvanceOrRetainSecret()
     {
         const string key = "sk-private12345678";
@@ -89,15 +129,16 @@ public sealed class MainWindowViewModelTests
 
     private sealed class FakeActions : IWizardActions
     {
-        public bool IsCodexInstalled { get; private set; }
+        public bool IsCodexInstalled { get; set; }
         public bool KeySucceeds { get; init; } = true;
         public bool InstallSucceeds { get; init; } = true;
         public bool LaunchSucceeds { get; init; } = true;
         public bool LaunchWasCalled { get; private set; }
         public bool PortableInstallWasCalled { get; private set; }
         public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
-        public Task<OperationResult<Unit>> InstallAsync(IProgress<double>? progress, CancellationToken cancellationToken)
+        public Task<OperationResult<Unit>> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
+            progress?.Report(new SetupProgress("正在下载 OpenAI 官方文件", 60));
             if (!InstallSucceeds)
             {
                 return Task.FromResult(OperationResult<Unit>.Failure("install.appx.failed", "官方离线部署失败"));
@@ -107,7 +148,7 @@ public sealed class MainWindowViewModelTests
         }
         public Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken) =>
             KeySucceeds ? Ok() : Task.FromResult(OperationResult<Unit>.Failure("key.invalid", "API Key 无效"));
-        public Task<OperationResult<Unit>> InstallPortableAsync(IProgress<double>? progress, CancellationToken cancellationToken)
+        public Task<OperationResult<Unit>> InstallPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
             PortableInstallWasCalled = true;
             IsCodexInstalled = true;
