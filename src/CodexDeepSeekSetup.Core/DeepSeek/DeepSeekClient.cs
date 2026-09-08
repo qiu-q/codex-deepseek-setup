@@ -32,6 +32,10 @@ public sealed class DeepSeekClient
         {
             using var request = CreateAuthorizedRequest(HttpMethod.Get, "user/balance", key);
             using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!IsOfficialResponse(response))
+            {
+                return OperationResult<DeepSeekAccountStatus>.Failure("deepseek.origin.rejected", "DeepSeek 请求被重定向到非官方地址，已停止");
+            }
             var mapped = MapFailure<DeepSeekAccountStatus>(response.StatusCode);
             if (mapped is not null)
             {
@@ -91,6 +95,10 @@ public sealed class DeepSeekClient
                 max_output_tokens = 32
             });
             using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!IsOfficialResponse(response))
+            {
+                return OperationResult<string>.Failure("deepseek.origin.rejected", "DeepSeek 请求被重定向到非官方地址，已停止");
+            }
             var mapped = MapFailure<string>(response.StatusCode);
             if (mapped is not null)
             {
@@ -148,4 +156,12 @@ public sealed class DeepSeekClient
 
     private static bool IsPlausibleKey(string key) =>
         key.StartsWith("sk-", StringComparison.Ordinal) && key.Length >= 11;
+
+    private static bool IsOfficialResponse(HttpResponseMessage response)
+    {
+        var uri = response.RequestMessage?.RequestUri;
+        return uri is not null &&
+            uri.Scheme == Uri.UriSchemeHttps &&
+            string.Equals(uri.Host, OfficialBaseUri.Host, StringComparison.OrdinalIgnoreCase);
+    }
 }

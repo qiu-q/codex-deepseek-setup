@@ -55,6 +55,17 @@ public sealed class OfficialDownloadServiceTests : IDisposable
         Assert.Equal("msix-content", await File.ReadAllTextAsync(result.Value!.MsixPath));
     }
 
+    [Fact]
+    public async Task DownloadCodexPayloadAsync_RejectsFinalResponseFromAnotherHost()
+    {
+        var service = new OfficialDownloadService(new HttpClient(new CrossOriginFinalResponseHandler()), new OfficialOriginPolicy());
+
+        var result = await service.DownloadCodexPayloadAsync(root, progress: null, default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("download.origin.rejected", result.ErrorCode);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
@@ -93,5 +104,15 @@ public sealed class OfficialDownloadServiceTests : IDisposable
 
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class CrossOriginFinalResponseHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://evil.example/payload"),
+                Content = new StringContent("untrusted")
+            });
     }
 }

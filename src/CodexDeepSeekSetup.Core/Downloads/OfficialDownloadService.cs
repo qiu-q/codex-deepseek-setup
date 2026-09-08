@@ -40,6 +40,10 @@ public sealed class OfficialDownloadService(HttpClient http, OfficialOriginPolic
         {
             return OperationResult<CodexPayload>.Failure("download.network.failed", "无法从 OpenAI 官方地址下载文件");
         }
+        catch (UnsafeDownloadOriginException)
+        {
+            return OperationResult<CodexPayload>.Failure("download.origin.rejected", "下载被重定向到非官方地址，已停止");
+        }
         catch (IOException)
         {
             return OperationResult<CodexPayload>.Failure("download.file.failed", "下载文件无法写入缓存目录");
@@ -94,6 +98,11 @@ public sealed class OfficialDownloadService(HttpClient http, OfficialOriginPolic
 
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
+        var finalUri = response.RequestMessage?.RequestUri;
+        if (finalUri is null || !originPolicy.EnsureAllowed(finalUri).IsSuccess)
+        {
+            throw new UnsafeDownloadOriginException();
+        }
         response.EnsureSuccessStatusCode();
 
         var isResume = existingLength > 0 && response.StatusCode == HttpStatusCode.PartialContent;
@@ -120,5 +129,9 @@ public sealed class OfficialDownloadService(HttpClient http, OfficialOriginPolic
         await output.FlushAsync(cancellationToken).ConfigureAwait(false);
         output.Close();
         File.Move(partial, destination, overwrite: true);
+    }
+
+    private sealed class UnsafeDownloadOriginException : Exception
+    {
     }
 }

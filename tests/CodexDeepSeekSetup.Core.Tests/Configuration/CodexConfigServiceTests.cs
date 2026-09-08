@@ -1,4 +1,5 @@
 using CodexDeepSeekSetup.Core.Configuration;
+using System.Text.Json;
 using Tomlyn;
 using Tomlyn.Model;
 
@@ -52,6 +53,14 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.Equal(@"C:\Program Files\Codex Setup\CodexDeepSeekSetup.exe", auth["command"]);
         Assert.Contains("deepseek-v4-flash", catalogText);
         Assert.DoesNotContain("sk-", configText + catalogText, StringComparison.OrdinalIgnoreCase);
+        using var catalog = JsonDocument.Parse(catalogText);
+        foreach (var model in catalog.RootElement.GetProperty("models").EnumerateArray())
+        {
+            Assert.False(string.IsNullOrWhiteSpace(model.GetProperty("base_instructions").GetString()));
+            Assert.Equal(JsonValueKind.Object, model.GetProperty("model_messages").ValueKind);
+            Assert.True(model.TryGetProperty("availability_nux", out _));
+            Assert.True(model.TryGetProperty("upgrade", out _));
+        }
     }
 
     [Fact]
@@ -67,6 +76,22 @@ public sealed class CodexConfigServiceTests : IDisposable
         Assert.False(result.IsSuccess);
         Assert.Equal("config.toml.invalid", result.ErrorCode);
         Assert.Equal(malformed, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task RestoreAsync_RestoresPreviousConfigAndRemovesNewCatalog()
+    {
+        Directory.CreateDirectory(root);
+        const string original = "model = \"original\"\n";
+        await File.WriteAllTextAsync(Path.Combine(root, "config.toml"), original);
+        var service = new CodexConfigService();
+        var applied = await service.ApplyAsync(CreateRequest(), default);
+
+        var restored = await service.RestoreAsync(applied.Value!, default);
+
+        Assert.True(restored.IsSuccess, restored.ErrorMessage);
+        Assert.Equal(original, await File.ReadAllTextAsync(Path.Combine(root, "config.toml")));
+        Assert.False(File.Exists(Path.Combine(root, "models.json")));
     }
 
     private CodexConfigRequest CreateRequest() => new(

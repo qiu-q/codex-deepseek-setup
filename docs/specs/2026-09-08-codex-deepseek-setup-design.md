@@ -154,7 +154,7 @@ args = ["credential", "read", "--target", "CodexDeepSeekSetup/DeepSeekApiKey"]
 ### 第 8 页：启动与验证
 
 - 验证包状态和当前用户注册状态。
-- 定位安装包内 Codex CLI 并运行 `--version`；不把 WindowsApps 中的文件复制到其他目录。
+- 定位安装包内 Codex CLI。若桌面包未生成用户级 CLI runtime，允许把已安装、已验证的同版本 `app\resources\codex*.exe` 配套文件复制到当前用户的版本化目录并设置 `CODEX_CLI_PATH`；不得修改来源包、混用版本或复制其他资源。
 - 运行一个最小、无工具的 DeepSeek Responses API 测试。
 - 通过正式 AUMID 启动桌面应用。
 - 检查 ChatGPT/Codex 进程、主窗口句柄和近期激活日志。

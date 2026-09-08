@@ -8,6 +8,61 @@ namespace CodexDeepSeekSetup.Core.Configuration;
 
 public sealed class CodexConfigService
 {
+    public async Task<OperationResult<Unit>> RestoreAsync(
+        ConfigApplyResult applied,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(applied);
+        var backupConfig = Path.Combine(applied.BackupDirectory, "config.toml");
+        var backupModels = Path.Combine(applied.BackupDirectory, "models.json");
+        try
+        {
+            string? config = null;
+            string? models = null;
+            if (File.Exists(backupConfig))
+            {
+                config = await File.ReadAllTextAsync(backupConfig, cancellationToken).ConfigureAwait(false);
+                _ = TomlSerializer.Deserialize<TomlTable>(config)
+                    ?? throw new InvalidDataException("备份 TOML 无效");
+            }
+            if (File.Exists(backupModels))
+            {
+                models = await File.ReadAllTextAsync(backupModels, cancellationToken).ConfigureAwait(false);
+                using (JsonDocument.Parse(models))
+                {
+                }
+            }
+
+            if (config is null)
+            {
+                File.Delete(applied.ConfigPath);
+            }
+            else
+            {
+                await WriteAtomicallyAsync(applied.ConfigPath, config, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (models is null)
+            {
+                File.Delete(applied.ModelCatalogPath);
+            }
+            else
+            {
+                await WriteAtomicallyAsync(applied.ModelCatalogPath, models, cancellationToken).ConfigureAwait(false);
+            }
+
+            return OperationResult<Unit>.Success(default);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return OperationResult<Unit>.Failure("config.restore.failed", "无法恢复上一次 Codex 配置，备份文件仍保留。");
+        }
+    }
+
     public async Task<OperationResult<ConfigApplyResult>> ApplyAsync(
         CodexConfigRequest request,
         CancellationToken cancellationToken)
@@ -15,6 +70,9 @@ public sealed class CodexConfigService
         ArgumentNullException.ThrowIfNull(request);
         var configPath = Path.Combine(request.CodexHome, "config.toml");
         var modelsPath = Path.Combine(request.CodexHome, "models.json");
+        var configExisted = File.Exists(configPath);
+        var modelsExisted = File.Exists(modelsPath);
+        string? backupDirectory = null;
 
         try
         {
@@ -28,7 +86,7 @@ public sealed class CodexConfigService
             }
 
             var catalog = await ModelCatalogTemplate.ReadAsync(cancellationToken).ConfigureAwait(false);
-            var backupDirectory = CreateBackupDirectory(request.CodexHome);
+            backupDirectory = CreateBackupDirectory(request.CodexHome);
             Directory.CreateDirectory(backupDirectory);
             CopyIfPresent(configPath, Path.Combine(backupDirectory, "config.toml"));
             CopyIfPresent(modelsPath, Path.Combine(backupDirectory, "models.json"));
@@ -49,10 +107,12 @@ public sealed class CodexConfigService
         }
         catch (OperationCanceledException)
         {
+            TryRollback(configPath, modelsPath, backupDirectory, configExisted, modelsExisted);
             throw;
         }
         catch (Exception)
         {
+            TryRollback(configPath, modelsPath, backupDirectory, configExisted, modelsExisted);
             return OperationResult<ConfigApplyResult>.Failure(
                 "config.write.failed",
                 "写入 Codex 配置失败，原配置已保留");
@@ -131,6 +191,41 @@ public sealed class CodexConfigService
         if (File.Exists(source))
         {
             File.Copy(source, destination, overwrite: false);
+        }
+    }
+
+    private static void TryRollback(
+        string configPath,
+        string modelsPath,
+        string? backupDirectory,
+        bool configExisted,
+        bool modelsExisted)
+    {
+        if (backupDirectory is null || !Directory.Exists(backupDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            RestoreOne(configPath, Path.Combine(backupDirectory, "config.toml"), configExisted);
+            RestoreOne(modelsPath, Path.Combine(backupDirectory, "models.json"), modelsExisted);
+        }
+        catch
+        {
+            // Best-effort rollback; the untouched backup remains available for manual recovery.
+        }
+    }
+
+    private static void RestoreOne(string destination, string backup, bool originallyExisted)
+    {
+        if (originallyExisted && File.Exists(backup))
+        {
+            File.Copy(backup, destination, overwrite: true);
+        }
+        else if (!originallyExisted && File.Exists(destination))
+        {
+            File.Delete(destination);
         }
     }
 

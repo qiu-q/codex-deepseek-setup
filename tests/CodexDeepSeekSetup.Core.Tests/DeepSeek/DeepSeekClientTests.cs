@@ -81,6 +81,22 @@ public sealed class DeepSeekClientTests
         Assert.Equal("连接成功", result.Value);
     }
 
+    [Fact]
+    public async Task ValidateAsync_RejectsFinalResponseFromAnotherHost()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{}"),
+            RequestMessage = new HttpRequestMessage(HttpMethod.Get, "https://evil.example/user/balance")
+        };
+        var client = new DeepSeekClient(new HttpClient(new FixedFinalResponseHandler(response)));
+
+        var result = await client.ValidateAsync("sk-valid12345678", default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("deepseek.origin.rejected", result.ErrorCode);
+    }
+
     private static DeepSeekClient Create(HttpStatusCode status, string content)
     {
         var handler = new StaticResponseHandler(new HttpResponseMessage(status)
@@ -99,5 +115,11 @@ public sealed class DeepSeekClientTests
             response.RequestMessage = request;
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class FixedFinalResponseHandler(HttpResponseMessage response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(response);
     }
 }
