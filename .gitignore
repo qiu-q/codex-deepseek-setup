@@ -9,3 +9,6 @@ artifacts/
 *.user
 *.suo
 *.log
+ChatGPT-License.xml
+ChatGPT-License.zip
+payload/
