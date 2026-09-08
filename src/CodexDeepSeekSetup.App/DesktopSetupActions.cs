@@ -617,7 +617,7 @@ public sealed class DesktopSetupActions : IWizardActions
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CodexDeepSeekSetup",
             "Downloads");
-        var downloadProgress = new Progress<DownloadProgress>(item =>
+        var downloadProgress = new InlineProgress<DownloadProgress>(item =>
         {
             var filePercent = item.TotalBytes is > 0
                 ? Math.Clamp(item.BytesDownloaded * 100d / item.TotalBytes.Value, 0, 100)
@@ -804,5 +804,10 @@ public sealed class DesktopSetupActions : IWizardActions
         }
 
         return secretStore.Delete(CredentialTargets.DeepSeekApiKey);
+    }
+
+    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 }

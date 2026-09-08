@@ -29,7 +29,7 @@ CodexDeepSeekSetup.exe
 CodexDeepSeekSetup.Helper.exe
 ```
 
-双击 `CodexDeepSeekSetup.exe`，程序会自动检查电脑。按向导完成三步：
+双击 `CodexDeepSeekSetup.exe`，程序会自动检查电脑。第一张向导页包含下载和安装两个阶段，依次完成：
 
 1. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
 2. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
