@@ -91,6 +91,7 @@ public sealed class DeepSeekClient
             {
                 model,
                 input = "只回复：连接成功",
+                reasoning = new { effort = "none" },
                 stream = false,
                 max_output_tokens = 32
             });
