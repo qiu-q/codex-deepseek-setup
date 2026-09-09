@@ -83,6 +83,20 @@ public sealed record CleanupRoots(
         }
     }
 
+    public string ResolveCodexHome(string? configuredPath)
+    {
+        var candidate = string.IsNullOrWhiteSpace(configuredPath)
+            ? Normalize(CodexHome)
+            : Normalize(Environment.ExpandEnvironmentVariables(configuredPath));
+        var profile = Normalize(UserProfile);
+        var local = Normalize(LocalAppData);
+        if (!IsStrictChild(candidate, profile) && !IsStrictChild(candidate, local))
+        {
+            throw new InvalidOperationException("CODEX_HOME 不在当前用户目录内，安装助手不会自动删除该外部路径。");
+        }
+        return candidate;
+    }
+
     private static bool IsStrictChild(string child, string parent) =>
         !string.Equals(child, parent, StringComparison.OrdinalIgnoreCase) && IsSameOrChild(child, parent);
 

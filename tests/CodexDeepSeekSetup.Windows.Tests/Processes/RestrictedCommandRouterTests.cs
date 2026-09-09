@@ -57,6 +57,31 @@ public sealed class RestrictedCommandRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_AllowsOwnedJsonVolumeRequestOnly()
+    {
+        Directory.CreateDirectory(requestRoot);
+        var request = Path.Combine(requestRoot, "volume.json");
+        await File.WriteAllTextAsync(request, "{}");
+        var output = new StringWriter();
+        var router = new RestrictedCommandRouter(new VisibleOperations(), requestRoot);
+
+        var accepted = await router.ExecuteAsync(
+            ["elevated", "appx-prepare-volume", request],
+            output,
+            TextWriter.Null,
+            default);
+        var rejected = await router.ExecuteAsync(
+            ["elevated", "appx-prepare-volume", @"C:\outside.json"],
+            output,
+            TextWriter.Null,
+            default);
+
+        Assert.Equal(0, accepted);
+        Assert.Equal(RestrictedCommandRouter.UsageError, rejected);
+        Assert.Contains("volume-request-ok", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RoutesOnlyExactAppxRemoveCommand()
     {
         var output = new StringWriter();
@@ -125,6 +150,12 @@ public sealed class RestrictedCommandRouterTests : IDisposable
         public Task<int> InstallAppxAsync(string requestFile, TextWriter output, TextWriter error, CancellationToken cancellationToken)
         {
             output.Write("appx-request-ok");
+            return Task.FromResult(0);
+        }
+
+        public Task<int> PrepareAppxVolumeAsync(string requestFile, TextWriter output, TextWriter error, CancellationToken cancellationToken)
+        {
+            output.Write("volume-request-ok");
             return Task.FromResult(0);
         }
 

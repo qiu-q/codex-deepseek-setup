@@ -8,6 +8,7 @@ namespace CodexDeepSeekSetup.App;
 
 public partial class MainWindow : Window
 {
+    private readonly DesktopSetupActions actions;
     private readonly MainWindowViewModel viewModel;
     private readonly CancellationTokenSource lifetime = new();
     private bool initialized;
@@ -21,7 +22,8 @@ public partial class MainWindow : Window
 #else
             BuildFlavor.OpenSource;
 #endif
-        viewModel = new MainWindowViewModel(DesktopSetupActions.Create(BuildFlavorOptions.For(flavor)));
+        actions = DesktopSetupActions.Create(BuildFlavorOptions.For(flavor));
+        viewModel = new MainWindowViewModel(actions);
         DataContext = viewModel;
     }
 
@@ -100,46 +102,36 @@ public partial class MainWindow : Window
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
-    private async void CleanupEverythingButton_Click(object sender, RoutedEventArgs e)
+    private void BrowseDownloadDirectoryButton_Click(object sender, RoutedEventArgs e)
     {
-        var confirmed = MessageBox.Show(
-            this,
-            "此操作将永久删除：\n\n" +
-            "• 当前电脑上的 OpenAI Codex 应用\n" +
-            "• 整个 %USERPROFILE%\\.codex（包括配置、插件缓存和会话）\n" +
-            "• DeepSeek API Key 的 Windows 凭据\n" +
-            "• 本助手创建的下载缓存、CLI、便携目录和安装记录\n" +
-            "• 本安装助手自身\n\n" +
-            "删除后无法恢复。是否继续？",
-            "彻底卸载并清理",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
-        if (confirmed != MessageBoxResult.Yes)
+        var dialog = new Microsoft.Win32.OpenFolderDialog
         {
-            return;
-        }
-
-        if (viewModel.NeedsLegacyCleanupWarning)
+            Title = "选择官方安装文件保存目录",
+            InitialDirectory = viewModel.DownloadDirectory,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) == true)
         {
-            var legacyConfirmed = MessageBox.Show(
-                this,
-                "没有找到完整的安装记录，无法确认 Codex 是否在使用本助手前已存在。\n\n本次仍会删除检测到的官方 Codex 和整个 .codex 目录。确定继续吗？",
-                "再次确认",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning,
-                MessageBoxResult.No);
-            if (legacyConfirmed != MessageBoxResult.Yes)
+            var result = viewModel.SelectDownloadDirectory(dialog.FolderName);
+            if (!result.IsSuccess)
             {
-                return;
+                MessageBox.Show(this, result.ErrorMessage, "目录不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
+    }
 
-        var result = await RunUiAsync(() => viewModel.CleanupAsync(lifetime.Token));
-        if (result?.IsSuccess == true && viewModel.ShouldExit)
-        {
-            Application.Current.Shutdown();
-        }
+    private void OpenMaintenanceButton_Click(object sender, RoutedEventArgs e) => OpenMaintenanceWindow();
+
+    private void CleanupEverythingButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenMaintenanceWindow();
+    }
+
+    private void OpenMaintenanceWindow()
+    {
+        var maintenance = new MaintenanceWindow(actions) { Owner = this };
+        maintenance.ShowDialog();
+        viewModel.RefreshExternalState();
     }
 
     private void OpenLink_Click(object sender, RoutedEventArgs e)

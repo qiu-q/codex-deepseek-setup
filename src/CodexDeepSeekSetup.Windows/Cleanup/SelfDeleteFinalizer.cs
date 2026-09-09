@@ -19,6 +19,12 @@ public sealed class SelfDeleteFinalizer(
         "PenImc_cor3.dll"
     ];
 
+    public static readonly IReadOnlyList<string> BundledPayloadFileNames =
+    [
+        "ChatGPT-x64.msix",
+        "ChatGPT-License.xml"
+    ];
+
     private readonly Func<int, CancellationToken, Task> wait = waitForProcess ?? WaitForProcessAsync;
     private readonly Action<string> schedule = scheduleSelfDelete ?? ScheduleSelfDelete;
 

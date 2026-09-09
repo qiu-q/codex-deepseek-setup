@@ -22,10 +22,18 @@ public enum CodexInstallStage
     InstallFailed
 }
 
+public sealed record InstallDriveChoice(string RootPath, string DisplayName, bool IsDefault);
+
 public interface IWizardActions
 {
     bool IsCodexInstalled { get; }
     bool HasInstallLedger { get; }
+    IReadOnlyList<InstallDriveChoice> InstallDriveChoices { get; }
+    string DownloadDirectory { get; }
+    string SelectedInstallDrive { get; }
+    string InstallationSummary { get; }
+    OperationResult<Unit> SelectDownloadDirectory(string directory);
+    OperationResult<Unit> SelectInstallDrive(string driveRoot);
     Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> InstallPreparedCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
@@ -118,6 +126,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (Set(ref isBusy, value))
             {
                 RaiseCommandProperties();
+                OnPropertyChanged(nameof(CanOpenMaintenance));
             }
         }
     }
@@ -171,7 +180,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool CanCleanup => IsCompleteStep && !IsBusy && !ShouldExit;
 
+    public bool CanOpenMaintenance => !IsBusy;
+
     public bool NeedsLegacyCleanupWarning => !actions.HasInstallLedger;
+
+    public IReadOnlyList<InstallDriveChoice> InstallDriveChoices => actions.InstallDriveChoices;
+
+    public string DownloadDirectory => actions.DownloadDirectory;
+
+    public string SelectedInstallDrive
+    {
+        get => actions.SelectedInstallDrive;
+        set => SelectInstallDrive(value);
+    }
+
+    public string InstallationSummary => actions.InstallationSummary;
 
     public bool ShouldExit
     {
@@ -240,6 +263,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             StatusMessage = "准备安装 Codex";
         }
         RaiseActionMetadata();
+        RaiseStorageProperties();
         return result;
     }
 
@@ -252,6 +276,49 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             StatusMessage = "检测到 Codex 已安装，可以直接配置 DeepSeek";
         }
         RaiseActionMetadata();
+        RaiseStorageProperties();
+        return result;
+    }
+
+    public OperationResult<Unit> SelectDownloadDirectory(string directory)
+    {
+        if (IsBusy)
+        {
+            return OperationResult<Unit>.Failure("wizard.busy", "已有操作正在进行。");
+        }
+
+        var result = actions.SelectDownloadDirectory(directory);
+        if (result.IsSuccess)
+        {
+            OnPropertyChanged(nameof(DownloadDirectory));
+            InstallStage = CodexInstallStage.NotDownloaded;
+            CanUsePortable = false;
+            StatusMessage = "安装包将保存到所选目录，请重新下载并校验";
+        }
+        else
+        {
+            StatusMessage = result.ErrorMessage ?? "下载目录不可用";
+        }
+        return result;
+    }
+
+    public OperationResult<Unit> SelectInstallDrive(string driveRoot)
+    {
+        if (IsBusy)
+        {
+            return OperationResult<Unit>.Failure("wizard.busy", "已有操作正在进行。");
+        }
+
+        var result = actions.SelectInstallDrive(driveRoot);
+        if (result.IsSuccess)
+        {
+            OnPropertyChanged(nameof(SelectedInstallDrive));
+            StatusMessage = $"Codex 将优先安装到 {driveRoot}";
+        }
+        else
+        {
+            StatusMessage = result.ErrorMessage ?? "安装磁盘不可用";
+        }
         return result;
     }
 
@@ -322,6 +389,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             CurrentStep = WizardStep.DeepSeek;
             RaiseActionMetadata();
+            RaiseStorageProperties();
         }
         else
         {
@@ -368,6 +436,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             CanUsePortable = false;
             CurrentStep = WizardStep.DeepSeek;
             RaiseActionMetadata();
+            RaiseStorageProperties();
         }
         else
         {
@@ -411,6 +480,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         InstallStage = CodexInstallStage.NotDownloaded;
         CanUsePortable = false;
         StatusMessage = "已返回第 1 步，可以重新测试官方文件下载";
+    }
+
+    public void RefreshExternalState()
+    {
+        RaiseActionMetadata();
+        RaiseStorageProperties();
     }
 
     public Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken) =>
@@ -568,6 +643,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private void RaiseActionMetadata() =>
         OnPropertyChanged(nameof(NeedsLegacyCleanupWarning));
+
+    private void RaiseStorageProperties()
+    {
+        OnPropertyChanged(nameof(InstallDriveChoices));
+        OnPropertyChanged(nameof(SelectedInstallDrive));
+        OnPropertyChanged(nameof(DownloadDirectory));
+        OnPropertyChanged(nameof(InstallationSummary));
+    }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {

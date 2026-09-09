@@ -35,6 +35,25 @@ public sealed class SelfDeleteFinalizerTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_PreservesBundledPayloadBecauseItIsAnIndependentSelection()
+    {
+        var appDirectory = CreatePublishedLayout();
+        var payload = Path.Combine(appDirectory, "payload");
+        Directory.CreateDirectory(payload);
+        await File.WriteAllTextAsync(Path.Combine(payload, "ChatGPT-x64.msix"), "official");
+        await File.WriteAllTextAsync(Path.Combine(payload, "ChatGPT-License.xml"), "official");
+        await File.WriteAllTextAsync(Path.Combine(payload, "customer.txt"), "keep");
+        var finalizer = CreateFinalizer();
+
+        var result = await finalizer.RunAsync(parentPid: 0, appDirectory, default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(File.Exists(Path.Combine(payload, "ChatGPT-x64.msix")));
+        Assert.True(File.Exists(Path.Combine(payload, "ChatGPT-License.xml")));
+        Assert.True(File.Exists(Path.Combine(payload, "customer.txt")));
+    }
+
+    [Fact]
     public async Task RunAsync_WhenCleanupFails_StillSchedulesTemporaryHelperDeletion()
     {
         var appDirectory = CreatePublishedLayout();

@@ -13,11 +13,12 @@ using CodexDeepSeekSetup.Windows.Diagnostics;
 using CodexDeepSeekSetup.Windows.Packages;
 using CodexDeepSeekSetup.Windows.Processes;
 using CodexDeepSeekSetup.Windows.Security;
+using CodexDeepSeekSetup.Windows.Storage;
 
 namespace CodexDeepSeekSetup.App;
 
 [SupportedOSPlatform("windows")]
-public sealed class DesktopSetupActions : IWizardActions
+public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
 {
     private readonly BuildFlavorOptions flavor;
     private readonly OfficialDownloadService downloader;
@@ -32,6 +33,8 @@ public sealed class DesktopSetupActions : IWizardActions
     private readonly IProcessRunner processRunner;
     private readonly AssistantInstallStateStore installStateStore;
     private readonly UserCleanupService userCleanupService;
+    private readonly CodexArtifactInventory artifactInventory;
+    private readonly SelectiveCleanupService selectiveCleanupService;
     private readonly string helperSourcePath;
     private readonly string helperPath;
     private readonly string previousCodexCliPath;
@@ -39,6 +42,22 @@ public sealed class DesktopSetupActions : IWizardActions
     private PortableCodexInstall? portableInstall;
     private AssistantInstallState? installState;
     private bool? codexExistedAtStart;
+    private CodexPackageStatus packageStatus = CodexPackageStatus.NotInstalled;
+    private string downloadDirectory;
+    private string selectedInstallDrive;
+    private bool downloadDirectoryWasSelected;
+
+    public IReadOnlyList<InstallDriveChoice> InstallDriveChoices { get; }
+
+    public string DownloadDirectory => downloadDirectory;
+
+    public string SelectedInstallDrive => selectedInstallDrive;
+
+    public string InstallationSummary => packageStatus.IsInstalled
+        ? $"已检测到 OpenAI Codex {packageStatus.Version} · {packageStatus.DriveRoot} · {packageStatus.InstallLocation}"
+        : portableInstall is not null
+            ? $"已检测到实验性 Codex · {portableInstall.AppPath}"
+            : "未检测到 Codex 安装";
 
     public bool IsCodexInstalled { get; private set; }
 
@@ -58,6 +77,9 @@ public sealed class DesktopSetupActions : IWizardActions
         IProcessRunner processRunner,
         AssistantInstallStateStore installStateStore,
         UserCleanupService userCleanupService,
+        CodexArtifactInventory artifactInventory,
+        SelectiveCleanupService selectiveCleanupService,
+        StorageSelectionService storageSelectionService,
         string helperSourcePath,
         string helperPath,
         string previousCodexCliPath)
@@ -75,9 +97,22 @@ public sealed class DesktopSetupActions : IWizardActions
         this.processRunner = processRunner;
         this.installStateStore = installStateStore;
         this.userCleanupService = userCleanupService;
+        this.artifactInventory = artifactInventory;
+        this.selectiveCleanupService = selectiveCleanupService;
         this.helperSourcePath = helperSourcePath;
         this.helperPath = helperPath;
         this.previousCodexCliPath = previousCodexCliPath;
+        var driveOptions = storageSelectionService.GetInstallDrives();
+        InstallDriveChoices = driveOptions
+            .Select(option => new InstallDriveChoice(option.RootPath, option.DisplayName, option.IsDefault))
+            .ToArray();
+        selectedInstallDrive = InstallDriveChoices.FirstOrDefault(choice => choice.IsDefault)?.RootPath
+            ?? InstallDriveChoices.FirstOrDefault()?.RootPath
+            ?? Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System))
+            ?? @"C:\";
+        downloadDirectory = StorageSelectionService.ResolveDefaultDownloadDirectory(
+            AppContext.BaseDirectory,
+            Path.Combine(GetAssistantDataRoot(), "Downloads"));
     }
 
     public static DesktopSetupActions Create(BuildFlavorOptions flavor)
@@ -92,10 +127,12 @@ public sealed class DesktopSetupActions : IWizardActions
             "CodexDeepSeekSetup.Helper.exe");
         var stateStore = new AssistantInstallStateStore(Path.Combine(GetAssistantDataRoot(), "install-state.json"));
         var secretStore = new WindowsCredentialStore();
+        var cleanupRoots = CleanupRoots.ForCurrentUser();
+        var userEnvironment = new WindowsUserEnvironment();
         var cleanupService = new UserCleanupService(
             secretStore,
-            new WindowsUserEnvironment(),
-            CleanupRoots.ForCurrentUser());
+            userEnvironment,
+            cleanupRoots);
         var requestDirectory = GetRequestDirectory();
         var elevatedExecutable = Environment.ProcessPath ?? throw new InvalidOperationException("无法确定当前安装程序路径。");
         var actions = new DesktopSetupActions(
@@ -112,6 +149,9 @@ public sealed class DesktopSetupActions : IWizardActions
             runner,
             stateStore,
             cleanupService,
+            new CodexArtifactInventory(cleanupRoots),
+            new SelectiveCleanupService(secretStore, userEnvironment, cleanupRoots),
+            new StorageSelectionService(),
             helperSource,
             helper,
             Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty);
@@ -120,6 +160,321 @@ public sealed class DesktopSetupActions : IWizardActions
         actions.portableInstall = PortableCodexInstaller.TryRecover(portableRoot, persistedCli);
         actions.IsCodexInstalled = actions.portableInstall is not null;
         return actions;
+    }
+
+    public async Task<OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>> ScanAsync(
+        CancellationToken cancellationToken)
+    {
+        installState ??= await installStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        if (!downloadDirectoryWasSelected && !string.IsNullOrWhiteSpace(installState?.DownloadCache))
+        {
+            try
+            {
+                downloadDirectory = Path.GetFullPath(installState.DownloadCache);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+            }
+        }
+        var status = await packageManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (!status.IsSuccess)
+        {
+            return OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>.Failure(status.ErrorCode!, status.ErrorMessage!);
+        }
+        packageStatus = status.Value!;
+        IsCodexInstalled = packageStatus.IsInstalled || portableInstall is not null;
+
+        var credential = secretStore.Exists(CredentialTargets.DeepSeekApiKey);
+        if (!credential.IsSuccess)
+        {
+            return OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>.Failure(
+                credential.ErrorCode!,
+                credential.ErrorMessage!);
+        }
+
+        var cliPath = Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User);
+        var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.Process)
+            ?? Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.User);
+        var artifacts = await artifactInventory.ScanAsync(
+            downloadDirectory,
+            packageStatus,
+            credential.Value,
+            cliPath,
+            codexHome,
+            cancellationToken).ConfigureAwait(false);
+        var items = artifacts.Select(MapArtifact).ToList();
+        var bundledPayloadDirectory = Path.Combine(AppContext.BaseDirectory, "payload");
+        var bundledPayloadFiles = SelfDeleteFinalizer.BundledPayloadFileNames
+            .Select(name => Path.Combine(bundledPayloadDirectory, name))
+            .Where(File.Exists)
+            .ToArray();
+        if (bundledPayloadFiles.Length > 0)
+        {
+            items.Add(new MaintenanceArtifactInfo(
+                CodexArtifactIds.BundledPayload,
+                "随助手附带的官方安装文件",
+                bundledPayloadDirectory,
+                bundledPayloadFiles.Sum(TryGetFileSize),
+                true,
+                false,
+                false));
+        }
+        if (SelfDeleteFinalizer.PublishedFileNames.Any(name => File.Exists(Path.Combine(AppContext.BaseDirectory, name))))
+        {
+            long size = 0;
+            foreach (var name in SelfDeleteFinalizer.PublishedFileNames)
+            {
+                var path = Path.Combine(AppContext.BaseDirectory, name);
+                if (File.Exists(path))
+                {
+                    size += TryGetFileSize(path);
+                }
+            }
+            items.Add(new MaintenanceArtifactInfo(
+                CodexArtifactIds.AssistantSelf,
+                "本安装助手",
+                AppContext.BaseDirectory,
+                size,
+                false,
+                false,
+                true));
+        }
+        return OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>.Success(items);
+    }
+
+    public async Task<OperationResult<Unit>> MoveInstalledCodexAsync(
+        string driveRoot,
+        CancellationToken cancellationToken)
+    {
+        var selected = SelectInstallDrive(driveRoot);
+        if (!selected.IsSuccess)
+        {
+            return selected;
+        }
+        var moved = await packageManager.MoveCurrentUserPackageAsync(driveRoot, cancellationToken).ConfigureAwait(false);
+        if (!moved.IsSuccess)
+        {
+            return moved;
+        }
+        var status = await packageManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (status.IsSuccess)
+        {
+            packageStatus = status.Value!;
+        }
+        return moved;
+    }
+
+    public async Task<OperationResult<MaintenanceCleanupOutcome>> CleanupSelectedAsync(
+        IReadOnlyCollection<string> artifactIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(artifactIds);
+        var selected = artifactIds.ToHashSet(StringComparer.Ordinal);
+        if (selected.Count == 0)
+        {
+            return OperationResult<MaintenanceCleanupOutcome>.Failure(
+                "maintenance.selection.empty",
+                "请至少选择一项需要删除的内容。");
+        }
+
+        string? finalizerPath = null;
+        if (selected.Contains(CodexArtifactIds.AssistantSelf))
+        {
+            var prepared = PrepareCleanupFinalizer();
+            if (!prepared.IsSuccess)
+            {
+                return OperationResult<MaintenanceCleanupOutcome>.Failure(prepared.ErrorCode!, prepared.ErrorMessage!);
+            }
+            finalizerPath = prepared.Value!;
+        }
+
+        try
+        {
+            var failures = new List<string>();
+            if (selected.Overlaps(
+                [
+                    CodexArtifactIds.Package,
+                    CodexArtifactIds.AppLocalData,
+                    CodexArtifactIds.DesktopRuntime,
+                    CodexArtifactIds.Cli,
+                    CodexArtifactIds.Portable
+                ]))
+            {
+                await processRunner.RunAsync(
+                    "powershell.exe",
+                    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Get-Process -Name ChatGPT,Codex -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"],
+                    null,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (selected.Contains(CodexArtifactIds.Package))
+            {
+                var removed = await packageManager.RemoveAsync(cancellationToken).ConfigureAwait(false);
+                if (!removed.IsSuccess)
+                {
+                    failures.Add(removed.ErrorMessage ?? "OpenAI Codex 系统包未能删除");
+                }
+                else
+                {
+                    packageStatus = CodexPackageStatus.NotInstalled;
+                    IsCodexInstalled = portableInstall is not null;
+                }
+            }
+
+            var userSelection = selected
+                .Where(id => id is not CodexArtifactIds.Package and not CodexArtifactIds.AssistantSelf and not CodexArtifactIds.BundledPayload)
+                .ToArray();
+            var cleaned = await selectiveCleanupService.CleanAsync(
+                userSelection,
+                downloadDirectory,
+                installState?.PreviousCodexCliPath,
+                Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.Process)
+                    ?? Environment.GetEnvironmentVariable("CODEX_HOME", EnvironmentVariableTarget.User),
+                cancellationToken).ConfigureAwait(false);
+            if (!cleaned.IsSuccess)
+            {
+                failures.Add(cleaned.ErrorMessage ?? "部分当前用户数据未能删除");
+            }
+            if (selected.Contains(CodexArtifactIds.Portable) && !Directory.Exists(GetPortableRoot()))
+            {
+                portableInstall = null;
+            }
+            IsCodexInstalled = packageStatus.IsInstalled || portableInstall is not null;
+
+            if (selected.Contains(CodexArtifactIds.BundledPayload))
+            {
+                var bundledCleanup = DeleteBundledPayloadFiles();
+                if (!bundledCleanup.IsSuccess)
+                {
+                    failures.Add(bundledCleanup.ErrorMessage ?? "随助手附带的官方安装文件未能删除");
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                return OperationResult<MaintenanceCleanupOutcome>.Failure(
+                    "cleanup.selected.partial",
+                    "部分内容已经处理，但以下项目未完成：" + string.Join("；", failures));
+            }
+
+            if (finalizerPath is null)
+            {
+                return OperationResult<MaintenanceCleanupOutcome>.Success(new MaintenanceCleanupOutcome(false));
+            }
+
+            var startInfo = new ProcessStartInfo(finalizerPath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetTempPath()
+            };
+            startInfo.ArgumentList.Add("finalize-cleanup");
+            startInfo.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(AppContext.BaseDirectory);
+            using var finalizer = Process.Start(startInfo);
+            if (finalizer is null)
+            {
+                return OperationResult<MaintenanceCleanupOutcome>.Failure(
+                    "cleanup.finalizer.start.failed",
+                    "所选内容已删除，但无法启动安装助手自删除程序。");
+            }
+
+            finalizerPath = null;
+            return OperationResult<MaintenanceCleanupOutcome>.Success(new MaintenanceCleanupOutcome(true));
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(finalizerPath))
+            {
+                TryDeleteFile(finalizerPath);
+            }
+        }
+    }
+
+    private static MaintenanceArtifactInfo MapArtifact(CodexArtifact artifact) => new(
+        artifact.Id,
+        artifact.DisplayName,
+        artifact.Location,
+        artifact.SizeBytes,
+        artifact.DefaultSelected,
+        artifact.RequiresAdministrator,
+        artifact.IsDestructiveUserData);
+
+    private static long TryGetFileSize(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static OperationResult<Unit> DeleteBundledPayloadFiles()
+    {
+        var payloadDirectory = Path.Combine(AppContext.BaseDirectory, "payload");
+        try
+        {
+            foreach (var name in SelfDeleteFinalizer.BundledPayloadFileNames)
+            {
+                var path = Path.Combine(payloadDirectory, name);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            if (Directory.Exists(payloadDirectory) && !Directory.EnumerateFileSystemEntries(payloadDirectory).Any())
+            {
+                Directory.Delete(payloadDirectory);
+            }
+            return OperationResult<Unit>.Success(default);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failure("cleanup.bundled_payload.failed", "无法删除随助手附带的官方安装文件，请关闭占用文件的程序后重试。");
+        }
+    }
+
+    public OperationResult<Unit> SelectDownloadDirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return Failure("download.directory.empty", "请选择安装包保存目录。");
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(directory);
+            Directory.CreateDirectory(fullPath);
+            var probe = Path.Combine(fullPath, $".codex-setup-write-test-{Guid.NewGuid():N}");
+            using (File.Create(probe))
+            {
+            }
+            File.Delete(probe);
+            downloadDirectory = fullPath;
+            downloadDirectoryWasSelected = true;
+            payload = null;
+            return OperationResult<Unit>.Success(default);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Failure("download.directory.unwritable", "所选目录不可写，请换一个目录。");
+        }
+    }
+
+    public OperationResult<Unit> SelectInstallDrive(string driveRoot)
+    {
+        var choice = InstallDriveChoices.FirstOrDefault(item =>
+            string.Equals(item.RootPath, driveRoot, StringComparison.OrdinalIgnoreCase));
+        if (choice is null)
+        {
+            return Failure("install.drive.unavailable", "所选磁盘不是可用的本地固定 NTFS 磁盘，或剩余空间不足 3 GB。");
+        }
+
+        selectedInstallDrive = choice.RootPath;
+        return OperationResult<Unit>.Success(default);
     }
 
     public static string GetRequestDirectory() => Path.Combine(
@@ -141,13 +496,29 @@ public sealed class DesktopSetupActions : IWizardActions
         }
 
         var report = result.Value!;
+        var packageStatusResult = await packageManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (!packageStatusResult.IsSuccess)
+        {
+            return Failure(packageStatusResult.ErrorCode!, packageStatusResult.ErrorMessage!);
+        }
+        packageStatus = packageStatusResult.Value!;
         installState ??= await installStateStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        if (!downloadDirectoryWasSelected && !string.IsNullOrWhiteSpace(installState?.DownloadCache))
+        {
+            try
+            {
+                downloadDirectory = Path.GetFullPath(installState.DownloadCache);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+            }
+        }
         codexExistedAtStart ??= installState?.CodexExistedBefore ?? report.IsCodexInstalled;
-        if (report.IsCodexInstalled)
+        if (packageStatus.IsInstalled)
         {
             portableInstall = null;
         }
-        IsCodexInstalled = report.IsCodexInstalled || portableInstall is not null;
+        IsCodexInstalled = packageStatus.IsInstalled || portableInstall is not null;
         if (!report.IsSupported)
         {
             return Failure("windows.unsupported", "需要 Windows 10 内部版本 19041 或更新的 x64 系统。");
@@ -264,6 +635,37 @@ public sealed class DesktopSetupActions : IWizardActions
             return registered;
         }
 
+        var moveWarning = string.Empty;
+        var statusAfterRegistration = await packageManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (statusAfterRegistration.IsSuccess)
+        {
+            packageStatus = statusAfterRegistration.Value!;
+        }
+        if (!string.IsNullOrWhiteSpace(selectedInstallDrive) &&
+            packageStatus.IsInstalled &&
+            !string.Equals(packageStatus.DriveRoot, selectedInstallDrive, StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report(new SetupProgress(
+                $"正在把 Codex 移到 {selectedInstallDrive}",
+                70,
+                SetupPhase.Deploy,
+                "只移动 OpenAI.Codex，不改变 Windows 其他应用的默认安装盘。"));
+            var moved = await packageManager.MoveCurrentUserPackageAsync(selectedInstallDrive, cancellationToken)
+                .ConfigureAwait(false);
+            if (!moved.IsSuccess)
+            {
+                moveWarning = moved.ErrorMessage ?? "目标磁盘迁移失败，Codex 已保留在原磁盘。";
+            }
+            else
+            {
+                var movedStatus = await packageManager.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+                if (movedStatus.IsSuccess)
+                {
+                    packageStatus = movedStatus.Value!;
+                }
+            }
+        }
+
         progress?.Report(new SetupProgress(
             "正在准备 Codex CLI",
             78,
@@ -292,7 +694,9 @@ public sealed class DesktopSetupActions : IWizardActions
             "Codex 安装完成",
             100,
             SetupPhase.Complete,
-            "系统部署、当前用户注册和 CLI 准备均已完成。"));
+            string.IsNullOrWhiteSpace(moveWarning)
+                ? $"系统部署、当前用户注册和 CLI 准备均已完成。安装盘：{packageStatus.DriveRoot}"
+                : $"Codex 已安装，但磁盘迁移未完成：{moveWarning}"));
         return OperationResult<Unit>.Success(default);
     }
 
@@ -580,10 +984,7 @@ public sealed class DesktopSetupActions : IWizardActions
             return OperationResult<CodexPayload>.Success(adjacent);
         }
 
-        var cache = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CodexDeepSeekSetup",
-            "Downloads");
+        var cache = downloadDirectory;
         var downloadProgress = new InlineProgress<DownloadProgress>(item =>
         {
             var filePercent = item.TotalBytes is > 0
@@ -729,7 +1130,7 @@ public sealed class DesktopSetupActions : IWizardActions
         InstallMode: mode,
         PreviousCodexCliPath: string.IsNullOrWhiteSpace(previousCodexCliPath) ? null : previousCodexCliPath,
         DeepSeekConfigured: false,
-        DownloadCache: Path.Combine(GetAssistantDataRoot(), "Downloads"),
+        DownloadCache: downloadDirectory,
         PortableDirectory: portableDirectory,
         CliDirectory: Path.GetDirectoryName(cliPath),
         CredentialHelperPath: helperPath,
@@ -745,6 +1146,7 @@ public sealed class DesktopSetupActions : IWizardActions
         installState = installState with
         {
             InstallMode = mode,
+            DownloadCache = downloadDirectory,
             PortableDirectory = portableDirectory,
             CliDirectory = Path.GetDirectoryName(cliPath),
             AssistantDirectory = AppContext.BaseDirectory

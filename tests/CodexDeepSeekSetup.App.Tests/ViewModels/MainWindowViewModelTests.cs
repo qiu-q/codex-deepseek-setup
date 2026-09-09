@@ -31,6 +31,45 @@ public sealed class MainWindowViewModelTests
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.True(viewModel.IsConfigureStep);
         Assert.Equal("Codex 已安装，下一步请准备 DeepSeek API Key", viewModel.StatusMessage);
+        Assert.Contains("D:\\WindowsApps", viewModel.InstallationSummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectDownloadDirectory_UpdatesVisibleLocationAndAction()
+    {
+        var actions = new FakeActions();
+        var viewModel = new MainWindowViewModel(actions);
+
+        var result = viewModel.SelectDownloadDirectory(@"D:\CodexDownloads");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(@"D:\CodexDownloads", viewModel.DownloadDirectory);
+        Assert.Equal(@"D:\CodexDownloads", actions.DownloadDirectory);
+    }
+
+    [Fact]
+    public async Task SelectDownloadDirectory_AfterDownloadRequiresFreshDownload()
+    {
+        var viewModel = new MainWindowViewModel(new FakeActions());
+        await viewModel.DownloadAsync(default);
+        Assert.True(viewModel.CanInstall);
+
+        var result = viewModel.SelectDownloadDirectory(@"D:\AnotherFolder");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(CodexInstallStage.NotDownloaded, viewModel.InstallStage);
+        Assert.False(viewModel.CanInstall);
+    }
+
+    [Fact]
+    public void SelectInstallDrive_RejectsDriveNotReportedByWindows()
+    {
+        var viewModel = new MainWindowViewModel(new FakeActions());
+
+        var result = viewModel.SelectInstallDrive(@"Z:\");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(@"D:\", viewModel.SelectedInstallDrive);
     }
 
     [Fact]
@@ -290,6 +329,16 @@ public sealed class MainWindowViewModelTests
     {
         public bool IsCodexInstalled { get; set; }
         public bool HasInstallLedger { get; set; }
+        public IReadOnlyList<InstallDriveChoice> InstallDriveChoices { get; } =
+        [
+            new(@"C:\", "系统 (C:) · 可用 20.0 GB", false),
+            new(@"D:\", "数据 (D:) · 可用 50.0 GB", true)
+        ];
+        public string DownloadDirectory { get; private set; } = @"C:\Setup\Downloads";
+        public string SelectedInstallDrive { get; private set; } = @"D:\";
+        public string InstallationSummary => IsCodexInstalled
+            ? @"已安装 OpenAI Codex 26.901.6511.0 · D:\WindowsApps"
+            : "未检测到 Codex";
         public bool KeySucceeds { get; init; } = true;
         public bool PrepareSucceeds { get; init; } = true;
         public int InstallFailuresRemaining { get; set; }
@@ -302,6 +351,20 @@ public sealed class MainWindowViewModelTests
         public int PrepareCallCount { get; private set; }
         public int InstallCallCount { get; private set; }
         public IReadOnlyList<SetupProgress>? PrepareProgress { get; init; }
+        public OperationResult<Unit> SelectDownloadDirectory(string directory)
+        {
+            DownloadDirectory = directory;
+            return OperationResult<Unit>.Success(default);
+        }
+        public OperationResult<Unit> SelectInstallDrive(string driveRoot)
+        {
+            if (InstallDriveChoices.All(item => item.RootPath != driveRoot))
+            {
+                return OperationResult<Unit>.Failure("drive.invalid", "磁盘不可用");
+            }
+            SelectedInstallDrive = driveRoot;
+            return OperationResult<Unit>.Success(default);
+        }
         public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
         public Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {

@@ -82,6 +82,21 @@ public sealed class WindowsCredentialStore : ISecretStore
         }
     }
 
+    public OperationResult<bool> Exists(string target)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        if (!CredRead(target, GenericCredential, 0, out var pointer))
+        {
+            var error = Marshal.GetLastWin32Error();
+            return error == ErrorNotFound
+                ? OperationResult<bool>.Success(false)
+                : Failure<bool>("credential.read.failed", "无法检查 DeepSeek API Key 凭据。", error);
+        }
+
+        CredFree(pointer);
+        return OperationResult<bool>.Success(true);
+    }
+
     public OperationResult<Unit> Delete(string target)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(target);

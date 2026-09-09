@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using CodexDeepSeekSetup.Windows.Packages;
 using CodexDeepSeekSetup.Windows.Security;
+using CodexDeepSeekSetup.Windows.Storage;
 
 namespace CodexDeepSeekSetup.Windows.Processes;
 
@@ -11,6 +12,8 @@ public sealed class DefaultRestrictedOperations(
     CodexPackageVerifier packageVerifier,
     IProcessRunner processRunner) : IRestrictedOperations
 {
+    private sealed record AppxVolumeRequest(string DriveRoot);
+
     public Task<int> ReadCredentialAsync(
         string target,
         TextWriter output,
@@ -104,6 +107,72 @@ public sealed class DefaultRestrictedOperations(
             new Dictionary<string, string?> { ["CODEX_SETUP_SERVICE"] = serviceName },
             cancellationToken).ConfigureAwait(false);
         return result.ExitCode;
+    }
+
+    public async Task<int> PrepareAppxVolumeAsync(
+        string requestFile,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        AppxVolumeRequest? request;
+        try
+        {
+            await using var stream = File.OpenRead(requestFile);
+            request = await JsonSerializer.DeserializeAsync<AppxVolumeRequest>(stream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            error.Write("安装磁盘请求无效。");
+            return 65;
+        }
+
+        if (request is null || !StorageSelectionService.IsDriveRoot(request.DriveRoot))
+        {
+            error.Write("安装磁盘必须是本地磁盘根路径。");
+            return 65;
+        }
+
+        try
+        {
+            var drive = new DriveInfo(request.DriveRoot);
+            if (!drive.IsReady || drive.DriveType != DriveType.Fixed ||
+                !string.Equals(drive.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase) ||
+                drive.AvailableFreeSpace < StorageSelectionService.MinimumInstallFreeBytes)
+            {
+                error.Write("目标磁盘必须是已就绪的本地固定 NTFS 磁盘，并且至少有 3 GB 可用空间。");
+                return 65;
+            }
+        }
+        catch
+        {
+            error.Write("无法读取目标磁盘。");
+            return 65;
+        }
+
+        const string script = """
+            $ErrorActionPreference='Stop'
+            $drive=$env:CODEX_SETUP_DRIVE
+            $volume=Get-AppxVolume -Path $drive -ErrorAction SilentlyContinue
+            if(-not $volume){
+                $volume=Add-AppxVolume -Path (Join-Path $drive 'WindowsApps')
+            }
+            if(-not (Get-AppxVolume -Path $drive -ErrorAction SilentlyContinue)){exit 2}
+            """;
+        var result = await processRunner.RunAsync(
+            "powershell.exe",
+            ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            new Dictionary<string, string?> { ["CODEX_SETUP_DRIVE"] = request.DriveRoot },
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            error.Write("无法准备目标 Windows 应用磁盘。");
+            return result.ExitCode;
+        }
+
+        output.Write("Windows 应用磁盘已准备。 ");
+        return 0;
     }
 
     public async Task<int> RemoveCodexAsync(

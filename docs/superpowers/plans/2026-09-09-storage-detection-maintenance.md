@@ -33,10 +33,10 @@
 **Interfaces:**
 - Produces: `StorageSelectionService.GetInstallDrives()`, `ResolveDefaultDownloadDirectory(string executableDirectory, string fallbackDirectory)`, and wizard properties for the selected paths.
 
-- [ ] Write tests proving D preference, system-drive fallback, and executable-adjacent download fallback.
-- [ ] Run the focused tests and confirm failure because the service does not exist.
-- [ ] Implement validated storage choices and expose them through the wizard.
-- [ ] Run the focused tests and confirm success.
+- [x] Write tests proving D preference, system-drive fallback, and executable-adjacent download fallback.
+- [x] Run the focused tests and confirm failure because the service does not exist.
+- [x] Implement validated storage choices and expose them through the wizard.
+- [x] Run the focused tests and confirm success.
 
 ### Task 2: Package Status and AppX Drive Movement
 
@@ -51,10 +51,10 @@
 **Interfaces:**
 - Produces: `ICodexPackageManager.GetStatusAsync()` and `MoveCurrentUserPackageAsync(string driveRoot)`.
 
-- [ ] Write tests for status JSON parsing and rejection of non-root or non-fixed target paths.
-- [ ] Run the focused tests and confirm the missing behavior fails.
-- [ ] Add status probing, restricted volume preparation, and current-user package movement.
-- [ ] Run the focused tests and confirm success.
+- [x] Write tests for status JSON parsing and rejection of non-root or non-fixed target paths.
+- [x] Run the focused tests and confirm the missing behavior fails.
+- [x] Add status probing, restricted volume preparation, and current-user package movement.
+- [x] Run the focused tests and confirm success.
 
 ### Task 3: Known Codex Data Inventory and Selective Cleanup
 
@@ -68,10 +68,10 @@
 **Interfaces:**
 - Produces: `CodexArtifact`, `CodexCleanupRequest`, `CodexArtifactInventory.ScanAsync(...)`, and `SelectiveCleanupService.CleanAsync(...)`.
 
-- [ ] Write tests proving only known roots and known download filenames are returned and deleted.
-- [ ] Run the focused tests and confirm failure because inventory and selective cleanup are missing.
-- [ ] Implement size-tolerant inventory and per-category cleanup without exposing secret values.
-- [ ] Run the focused tests and confirm success.
+- [x] Write tests proving only known roots and known download filenames are returned and deleted.
+- [x] Run the focused tests and confirm failure because inventory and selective cleanup are missing.
+- [x] Implement size-tolerant inventory and per-category cleanup without exposing secret values.
+- [x] Run the focused tests and confirm success.
 
 ### Task 4: Maintenance User Interface
 
@@ -88,10 +88,10 @@
 - Consumes: inventory and selective cleanup interfaces from Task 3.
 - Produces: an always-available “检测与清理” dialog with refresh, selection summary, confirmation, and per-item results.
 
-- [ ] Write failing view-model and window construction tests.
-- [ ] Run the focused tests and confirm expected failures.
-- [ ] Implement the maintenance dialog and persistent installed-state banner.
-- [ ] Run focused tests and confirm success.
+- [x] Write failing view-model and window construction tests.
+- [x] Run the focused tests and confirm expected failures.
+- [x] Implement the maintenance dialog and persistent installed-state banner.
+- [x] Run focused tests and confirm success.
 
 ### Task 5: Integration and Release
 
@@ -103,7 +103,7 @@
 - Consumes: all prior tasks.
 - Produces: open-source and internal Windows x64 ZIP artifacts.
 
-- [ ] Run all unit tests and Windows WPF startup tests.
-- [ ] Publish both build flavors for `win-x64`.
-- [ ] Inspect ZIP contents and compute SHA-256 hashes.
-- [ ] Document the Windows 10 AppX movement checks that still require a physical test machine.
+- [ ] Run all unit tests and Windows WPF startup tests (unit tests pass; WPF startup tests require Windows).
+- [x] Publish both build flavors for `win-x64`.
+- [x] Inspect ZIP contents and compute SHA-256 hashes.
+- [x] Document the Windows 10 AppX movement checks that still require a physical test machine.

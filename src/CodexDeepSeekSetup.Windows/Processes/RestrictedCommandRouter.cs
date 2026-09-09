@@ -19,6 +19,12 @@ public interface IRestrictedOperations
         TextWriter error,
         CancellationToken cancellationToken);
 
+    Task<int> PrepareAppxVolumeAsync(
+        string requestFile,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken);
+
     Task<int> RemoveCodexAsync(
         TextWriter output,
         TextWriter error,
@@ -68,15 +74,17 @@ public sealed class RestrictedCommandRouter
         ArgumentNullException.ThrowIfNull(args);
         return args switch
         {
-        ["credential", "read", "--target", CredentialTargets.DeepSeekApiKey] =>
-            operations.ReadCredentialAsync(CredentialTargets.DeepSeekApiKey, output, error, cancellationToken),
+            ["credential", "read", "--target", CredentialTargets.DeepSeekApiKey] =>
+                operations.ReadCredentialAsync(CredentialTargets.DeepSeekApiKey, output, error, cancellationToken),
             ["elevated", "appx-install", var requestFile] when IsOwnedRequestFile(requestFile) =>
-                    operations.InstallAppxAsync(Path.GetFullPath(requestFile), output, error, cancellationToken),
-                    ["elevated", "appx-remove"] =>
-                    operations.RemoveCodexAsync(output, error, cancellationToken),
-                    ["elevated", "start-service", var serviceName] when AllowedServices.Contains(serviceName) =>
-                    operations.StartServiceAsync(serviceName, output, error, cancellationToken),
-                    ["resume"] => operations.ResumeAsync(output, error, cancellationToken),
+                operations.InstallAppxAsync(Path.GetFullPath(requestFile), output, error, cancellationToken),
+            ["elevated", "appx-prepare-volume", var requestFile] when IsOwnedRequestFile(requestFile) =>
+                operations.PrepareAppxVolumeAsync(Path.GetFullPath(requestFile), output, error, cancellationToken),
+            ["elevated", "appx-remove"] =>
+                operations.RemoveCodexAsync(output, error, cancellationToken),
+            ["elevated", "start-service", var serviceName] when AllowedServices.Contains(serviceName) =>
+                operations.StartServiceAsync(serviceName, output, error, cancellationToken),
+            ["resume"] => operations.ResumeAsync(output, error, cancellationToken),
             _ => Task.FromResult(UsageError)
         };
     }

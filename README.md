@@ -5,6 +5,9 @@
 它会：
 
 - 从 OpenAI 固定官方地址下载 `ChatGPT-x64.msix` 和离线许可证；
+- 启动时检测当前用户是否已安装 Codex，并持续显示版本、实际安装盘和安装路径；
+- 安装包默认保存到本助手 EXE 旁的 `Downloads`，目录不可写时回退到当前用户本地数据目录，也可以在下载前自行选择；
+- 列出符合条件的 Windows AppX 安装盘，D 盘可用时默认选择 D，只迁移 Codex，不改变其他应用的默认安装盘；
 - 把下载校验和系统安装拆成两个明确阶段，分别重试；
 - 显示当前文件、已下载/总大小、百分比、实时速度、预计剩余时间、总体进度和最多 200 条带时间记录；
 - 校验 MSIX 包身份、架构、内部签名文件以及 Windows Authenticode 状态；
@@ -16,7 +19,7 @@
 - 备份并合并 `%USERPROFILE%\.codex\config.toml`，保留已有 MCP、插件等无关配置；
 - 若官方桌面包没有生成用户级 CLI runtime，则从已验证安装包复制同版本 `codex*.exe` 配套文件到当前用户目录，并设置 `CODEX_CLI_PATH`（不修改或重打包 MSIX）。
 - 按“安装 Codex → 配置 DeepSeek → 完成”的三步向导自动推进，当前页只显示下一个应执行的操作。
-- 在完成页提供需要两次明确确认的彻底清理功能。
+- 随时提供“检测安装与清理数据”窗口，可查看位置和大小，并按项删除安装包、Codex、用户数据、CLI、凭据、缓存或安装助手自身。
 
 它不会安装或配置 FlClash、代理、VPN、DNS、路由或节点订阅，也不包含 API Key。
 
@@ -31,20 +34,23 @@ CodexDeepSeekSetup.Helper.exe
 
 双击 `CodexDeepSeekSetup.exe`，程序会自动检查电脑。第一张向导页包含下载和安装两个阶段，依次完成：
 
-1. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
-2. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
-3. 在 DeepSeek 官方平台准备 API Key，粘贴后点击“验证并配置 Codex”。
-4. 在完成页启动 Codex，或关闭安装助手。
+1. 确认“安装包保存到”和“Codex 安装磁盘”。D 盘是已就绪的本地固定 NTFS 磁盘且可用空间不少于 3 GB 时会被优先选择；否则使用系统盘。
+2. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
+3. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
+4. 在 DeepSeek 官方平台准备 API Key，粘贴后点击“验证并配置 Codex”。
+5. 在完成页启动 Codex，或关闭安装助手。
 
 下载区域会持续显示文件级进度与总体进度。展开“查看详细记录”可查看检查、下载、校验、授权、部署、注册、CLI 和保存状态等阶段；记录只包含运行状态，不包含 API Key。
 
 配置前请在 [DeepSeek 开放平台](https://platform.deepseek.com/)完成账户准备，并在 [API Keys](https://platform.deepseek.com/api_keys) 页面创建密钥。实名认证资料只应填写在 DeepSeek 官方页面。
 
-## 彻底卸载与清理
+## 安装位置与检测清理
 
-完成页的“彻底卸载并清理”是不可恢复操作。确认后将删除检测到的 `OpenAI.Codex` 用户包和系统预配包、整个 `%USERPROFILE%\.codex`（包括配置、插件缓存和会话）、DeepSeek Windows 凭据、本助手创建的 CLI/便携目录/下载缓存/安装记录，最后删除安装助手自身。
+MSIX 桌面应用的位置由 Windows AppX 管理，不能选择任意普通文件夹。安装助手使用 Windows 的 AppX 卷机制和 `Move-AppxPackage` 移动 Codex；目标通常是 `<盘符>:\WindowsApps`。根据 [Microsoft 的说明](https://learn.microsoft.com/en-us/powershell/module/appx/move-appxpackage)，移动包时应用数据也会随包移动。迁移失败不会回滚已经完成的 Codex 安装，维护窗口可稍后重试。
 
-移除系统预配包需要 Windows 管理员授权；如果取消该授权，程序不会继续删除用户数据。安装助手所在目录如果还有不属于发布包的文件，这些未知文件会被保留。
+窗口顶部的“检测安装与清理数据”随时可用。它只扫描当前用户和本助手的已知位置，包括 `OpenAI.Codex`、`.codex`、Windows 应用本地数据、CLI、实验性目录、下载文件、安装状态、`CODEX_CLI_PATH` 以及 DeepSeek 凭据是否存在；不会读取或显示 Key。
+
+清理时每一类内容独立选择。下载项只删除 `ChatGPT-x64.msix`、`ChatGPT-License.xml` 及其临时分片，不递归删除用户选择的下载目录。`.codex`、Windows 应用数据、凭据和安装助手自身默认不勾选；选中后会在最终清单中标红并再次确认。移除系统包需要 Windows 管理员授权。安装助手自删除只移除已知发布文件；随助手附带的两个官方安装文件有独立选项，旁边的未知文件始终保留。
 
 ## 构建
 
