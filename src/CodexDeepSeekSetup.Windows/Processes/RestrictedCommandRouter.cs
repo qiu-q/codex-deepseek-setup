@@ -36,6 +36,11 @@ public interface IRestrictedOperations
         TextWriter error,
         CancellationToken cancellationToken);
 
+    Task<int> EnableBuiltInAdministratorCompatibilityAsync(
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken);
+
     Task<int> ResumeAsync(
         TextWriter output,
         TextWriter error,
@@ -82,6 +87,8 @@ public sealed class RestrictedCommandRouter
                 operations.PrepareAppxVolumeAsync(Path.GetFullPath(requestFile), output, error, cancellationToken),
             ["elevated", "appx-remove"] =>
                 operations.RemoveCodexAsync(output, error, cancellationToken),
+            ["elevated", "enable-builtin-admin-compatibility"] =>
+                operations.EnableBuiltInAdministratorCompatibilityAsync(output, error, cancellationToken),
             ["elevated", "start-service", var serviceName] when AllowedServices.Contains(serviceName) =>
                 operations.StartServiceAsync(serviceName, output, error, cancellationToken),
             ["resume"] => operations.ResumeAsync(output, error, cancellationToken),

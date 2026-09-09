@@ -105,6 +105,29 @@ public sealed class RestrictedCommandRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_RoutesOnlyExactBuiltInAdministratorCompatibilityCommand()
+    {
+        var output = new StringWriter();
+        var operations = new VisibleOperations();
+        var router = new RestrictedCommandRouter(operations, requestRoot);
+
+        var accepted = await router.ExecuteAsync(
+            ["elevated", "enable-builtin-admin-compatibility"],
+            output,
+            TextWriter.Null,
+            default);
+        var rejected = await router.ExecuteAsync(
+            ["elevated", "enable-builtin-admin-compatibility", "extra"],
+            output,
+            TextWriter.Null,
+            default);
+
+        Assert.Equal(0, accepted);
+        Assert.Equal(RestrictedCommandRouter.UsageError, rejected);
+        Assert.True(operations.EnableBuiltInAdministratorCompatibilityCalled);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RejectsAppxRequestOutsideOwnedDirectory()
     {
         var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.json");
@@ -140,6 +163,7 @@ public sealed class RestrictedCommandRouterTests : IDisposable
     private sealed class VisibleOperations : IRestrictedOperations
     {
         public bool RemoveCodexCalled { get; private set; }
+        public bool EnableBuiltInAdministratorCompatibilityCalled { get; private set; }
 
         public Task<int> ReadCredentialAsync(string target, TextWriter output, TextWriter error, CancellationToken cancellationToken)
         {
@@ -175,6 +199,13 @@ public sealed class RestrictedCommandRouterTests : IDisposable
         public Task<int> ResumeAsync(TextWriter output, TextWriter error, CancellationToken cancellationToken)
         {
             output.Write("resume-ok");
+            return Task.FromResult(0);
+        }
+
+        public Task<int> EnableBuiltInAdministratorCompatibilityAsync(TextWriter output, TextWriter error, CancellationToken cancellationToken)
+        {
+            EnableBuiltInAdministratorCompatibilityCalled = true;
+            output.Write("builtin-admin-compatibility-ok");
             return Task.FromResult(0);
         }
     }

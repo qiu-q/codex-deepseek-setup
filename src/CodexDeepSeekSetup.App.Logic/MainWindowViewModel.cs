@@ -39,6 +39,7 @@ public interface IWizardActions
     Task<OperationResult<Unit>> InstallPreparedCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> InstallPreparedPortableAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken);
     Task<OperationResult<Unit>> ValidateAndConfigureAsync(string apiKey, CancellationToken cancellationToken);
+    Task<OperationResult<Unit>> EnableBuiltInAdministratorCompatibilityAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken);
     Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken);
 }
@@ -62,6 +63,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private double fileProgress;
     private double overallProgress;
     private bool shouldExit;
+    private bool needsBuiltInAdministratorCompatibility;
+    private bool restartScheduled;
     private CodexInstallStage installStage = CodexInstallStage.NotDownloaded;
     private DownloadRateEstimator rateEstimator = new();
     private string? lastProgressLogKey;
@@ -182,6 +185,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool CanOpenMaintenance => !IsBusy;
 
+    public bool NeedsBuiltInAdministratorCompatibility
+    {
+        get => needsBuiltInAdministratorCompatibility;
+        private set
+        {
+            if (Set(ref needsBuiltInAdministratorCompatibility, value))
+            {
+                OnPropertyChanged(nameof(CanEnableBuiltInAdministratorCompatibility));
+            }
+        }
+    }
+
+    public bool RestartScheduled
+    {
+        get => restartScheduled;
+        private set
+        {
+            if (Set(ref restartScheduled, value))
+            {
+                OnPropertyChanged(nameof(CanEnableBuiltInAdministratorCompatibility));
+            }
+        }
+    }
+
+    public bool CanEnableBuiltInAdministratorCompatibility =>
+        NeedsBuiltInAdministratorCompatibility && !RestartScheduled && !IsBusy;
+
     public bool NeedsLegacyCleanupWarning => !actions.HasInstallLedger;
 
     public IReadOnlyList<InstallDriveChoice> InstallDriveChoices => actions.InstallDriveChoices;
@@ -247,6 +277,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             "准备安装 Codex",
             actions.CheckAsync,
             cancellationToken);
+        UpdateBuiltInAdministratorCompatibility(result);
         if (actions.IsCodexInstalled)
         {
             AdvanceInstalledCodexToConfiguration(
@@ -269,6 +300,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public async Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken)
     {
         var result = await RunAsync("正在检查 Windows…", "检查通过，可以下载安装", actions.CheckAsync, cancellationToken);
+        UpdateBuiltInAdministratorCompatibility(result);
         if (actions.IsCodexInstalled)
         {
             AdvanceInstalledCodexToConfiguration(
@@ -291,6 +323,38 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : $"检测到 Codex 已安装，可以继续配置 DeepSeek。启动兼容提示：{readinessResult.ErrorMessage}";
         RaiseActionMetadata();
         RaiseStorageProperties();
+    }
+
+    private void UpdateBuiltInAdministratorCompatibility(OperationResult<Unit> result)
+    {
+        NeedsBuiltInAdministratorCompatibility =
+            string.Equals(result.ErrorCode, "windows.builtin_admin.restricted", StringComparison.Ordinal);
+        if (!NeedsBuiltInAdministratorCompatibility)
+        {
+            RestartScheduled = false;
+        }
+    }
+
+    public async Task<OperationResult<Unit>> EnableBuiltInAdministratorCompatibilityAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!NeedsBuiltInAdministratorCompatibility)
+        {
+            return OperationResult<Unit>.Failure(
+                "windows.builtin_admin.not_required",
+                "当前账户不需要启用内置 Administrator 兼容模式。");
+        }
+
+        var result = await RunAsync(
+            "正在启用内置 Administrator 兼容模式…",
+            "兼容模式已启用，Windows 将在 15 秒后重启，下次登录后会自动重新打开本助手。",
+            actions.EnableBuiltInAdministratorCompatibilityAsync,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            RestartScheduled = true;
+        }
+        return result;
     }
 
     public OperationResult<Unit> SelectDownloadDirectory(string directory)
@@ -652,6 +716,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CanLaunch));
         OnPropertyChanged(nameof(CanRunPortable));
         OnPropertyChanged(nameof(CanCleanup));
+        OnPropertyChanged(nameof(CanEnableBuiltInAdministratorCompatibility));
     }
 
     private void RaiseActionMetadata() =>

@@ -66,7 +66,35 @@
         </Border>
 
         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-            <Grid Margin="30,24">
+            <StackPanel Margin="30,24">
+                <Border Visibility="{Binding NeedsBuiltInAdministratorCompatibility, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        Background="#FFF7ED"
+                        BorderBrush="#FDBA74"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="16"
+                        Margin="0,0,0,16">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="内置 Administrator 需要开启兼容模式" FontSize="17" FontWeight="SemiBold" Foreground="#9A3412" />
+                            <TextBlock Text="助手会启用管理员批准模式，登记一次性自动重开，并在 15 秒后重启 Windows。请先保存其他程序中的工作；如需取消已安排的重启，可按 Win+R 运行 shutdown /a。"
+                                       TextWrapping="Wrap" Margin="0,6,16,0" Foreground="#7C2D12" />
+                        </StackPanel>
+                        <Button x:Name="EnableAdministratorCompatibilityButton"
+                                Grid.Column="1"
+                                Content="启用兼容并重启"
+                                Click="EnableAdministratorCompatibilityButton_Click"
+                                IsEnabled="{Binding CanEnableBuiltInAdministratorCompatibility}"
+                                Background="#EA580C"
+                                Foreground="White"
+                                VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+
                 <Border x:Name="InstallStepPanel"
                         Visibility="{Binding IsInstallStep, Converter={StaticResource BooleanToVisibilityConverter}}"
                         Background="White" CornerRadius="12" Padding="28">
@@ -223,7 +251,7 @@
                                 Foreground="#B91C1C" />
                     </StackPanel>
                 </Border>
-            </Grid>
+            </StackPanel>
         </ScrollViewer>
 
         <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="30,14">

@@ -29,6 +29,42 @@ public sealed class CodexPackageRemovalTests
         Assert.Null(runner.Environment);
     }
 
+    [Fact]
+    public async Task EnableBuiltInAdministratorCompatibilityAsync_UsesFixedPolicyRunOnceAndRestartScript()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"codex-admin-compat-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var executable = Path.Combine(directory, "CodexDeepSeekSetup.exe");
+        await File.WriteAllBytesAsync(executable, [0]);
+        try
+        {
+            var runner = new RecordingProcessRunner();
+            var operations = new DefaultRestrictedOperations(
+                new EmptySecretStore(),
+                new CodexPackageVerifier(new AlwaysValidSignatureVerifier()),
+                runner,
+                () => executable);
+
+            var exitCode = await operations.EnableBuiltInAdministratorCompatibilityAsync(
+                TextWriter.Null,
+                TextWriter.Null,
+                default);
+
+            Assert.Equal(0, exitCode);
+            Assert.Equal("powershell.exe", runner.FileName);
+            var script = Assert.Single(runner.Arguments.Where(argument =>
+                argument.Contains("FilterAdministratorToken", StringComparison.Ordinal)));
+            Assert.Contains("RunOnce", script, StringComparison.Ordinal);
+            Assert.Contains("shutdown.exe /r /t 15", script, StringComparison.Ordinal);
+            Assert.Contains("EndsWith('-500')", script, StringComparison.Ordinal);
+            Assert.Equal(Path.GetFullPath(executable), runner.Environment?["CODEX_SETUP_RELAUNCH"]);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class RecordingProcessRunner : IProcessRunner
     {
         public string? FileName { get; private set; }

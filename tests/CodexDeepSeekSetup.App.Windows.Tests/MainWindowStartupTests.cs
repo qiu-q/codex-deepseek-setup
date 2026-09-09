@@ -33,6 +33,7 @@ public sealed class MainWindowStartupTests
                 Assert.IsType<ComboBox>(window.FindName("InstallDriveComboBox"));
                 Assert.IsType<Button>(window.FindName("BrowseDownloadDirectoryButton"));
                 Assert.IsType<Button>(window.FindName("OpenMaintenanceButton"));
+                Assert.IsType<Button>(window.FindName("EnableAdministratorCompatibilityButton"));
                 var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
                 var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
                 var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));

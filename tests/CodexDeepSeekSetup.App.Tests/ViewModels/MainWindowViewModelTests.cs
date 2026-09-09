@@ -56,6 +56,29 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task EnableBuiltInAdministratorCompatibilityAsync_WhenWarningIsPresent_RequestsRestartSetup()
+    {
+        var actions = new FakeActions
+        {
+            IsCodexInstalled = true,
+            CheckFailure = OperationResult<Unit>.Failure(
+                "windows.builtin_admin.restricted",
+                "内置 Administrator 需要启用管理员批准模式并重启。")
+        };
+        var viewModel = new MainWindowViewModel(actions);
+        await viewModel.InitializeAsync(default);
+
+        var result = await viewModel.EnableBuiltInAdministratorCompatibilityAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(actions.EnableBuiltInAdministratorCompatibilityWasCalled);
+        Assert.True(viewModel.NeedsBuiltInAdministratorCompatibility);
+        Assert.False(viewModel.CanEnableBuiltInAdministratorCompatibility);
+        Assert.True(viewModel.RestartScheduled);
+        Assert.Contains("重启", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SelectDownloadDirectory_UpdatesVisibleLocationAndAction()
     {
         var actions = new FakeActions();
@@ -370,6 +393,7 @@ public sealed class MainWindowViewModelTests
         public bool LaunchWasCalled { get; private set; }
         public bool PortableInstallWasCalled { get; private set; }
         public bool CleanupWasCalled { get; private set; }
+        public bool EnableBuiltInAdministratorCompatibilityWasCalled { get; private set; }
         public int PrepareCallCount { get; private set; }
         public int InstallCallCount { get; private set; }
         public IReadOnlyList<SetupProgress>? PrepareProgress { get; init; }
@@ -436,6 +460,11 @@ public sealed class MainWindowViewModelTests
             return CleanupSucceeds
                 ? Ok()
                 : Task.FromResult(OperationResult<Unit>.Failure("cleanup.failed", "未能完全清理，请重试"));
+        }
+        public Task<OperationResult<Unit>> EnableBuiltInAdministratorCompatibilityAsync(CancellationToken cancellationToken)
+        {
+            EnableBuiltInAdministratorCompatibilityWasCalled = true;
+            return Ok();
         }
         private static Task<OperationResult<Unit>> Ok() => Task.FromResult(OperationResult<Unit>.Success(default));
     }

@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.Versioning;
 using System.Diagnostics;
+using System.ComponentModel;
 using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Configuration;
 using CodexDeepSeekSetup.Core.DeepSeek;
@@ -38,6 +39,7 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
     private readonly string helperSourcePath;
     private readonly string helperPath;
     private readonly string previousCodexCliPath;
+    private readonly string elevatedExecutablePath;
     private CodexPayload? payload;
     private PortableCodexInstall? portableInstall;
     private AssistantInstallState? installState;
@@ -82,7 +84,8 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         StorageSelectionService storageSelectionService,
         string helperSourcePath,
         string helperPath,
-        string previousCodexCliPath)
+        string previousCodexCliPath,
+        string elevatedExecutablePath)
     {
         this.flavor = flavor;
         this.downloader = downloader;
@@ -102,6 +105,7 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         this.helperSourcePath = helperSourcePath;
         this.helperPath = helperPath;
         this.previousCodexCliPath = previousCodexCliPath;
+        this.elevatedExecutablePath = elevatedExecutablePath;
         var driveOptions = storageSelectionService.GetInstallDrives();
         InstallDriveChoices = driveOptions
             .Select(option => new InstallDriveChoice(option.RootPath, option.DisplayName, option.IsDefault))
@@ -154,7 +158,8 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
             new StorageSelectionService(),
             helperSource,
             helper,
-            Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty);
+            Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty,
+            elevatedExecutable);
         var portableRoot = GetPortableRoot();
         var persistedCli = Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User);
         actions.portableInstall = PortableCodexInstaller.TryRecover(portableRoot, persistedCli);
@@ -545,6 +550,49 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         }
 
         return OperationResult<Unit>.Success(default);
+    }
+
+    public async Task<OperationResult<Unit>> EnableBuiltInAdministratorCompatibilityAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(elevatedExecutablePath))
+        {
+            return Failure(
+                "windows.builtin_admin.relaunch_missing",
+                "找不到当前安装助手，无法设置重启后自动重开。");
+        }
+
+        try
+        {
+            var startInfo = new ProcessStartInfo(elevatedExecutablePath)
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = Path.GetDirectoryName(elevatedExecutablePath)!
+            };
+            startInfo.ArgumentList.Add("elevated");
+            startInfo.ArgumentList.Add("enable-builtin-admin-compatibility");
+            using var process = Process.Start(startInfo);
+            if (process is null)
+            {
+                return Failure("windows.builtin_admin.elevation_failed", "无法启动 Windows 管理员授权。");
+            }
+
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            return process.ExitCode == 0
+                ? OperationResult<Unit>.Success(default)
+                : Failure(
+                    "windows.builtin_admin.enable_failed",
+                    $"启用兼容模式失败（退出码 {process.ExitCode}）。请确认 UAC 已启用，然后重试。");
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
+        {
+            return Failure("windows.builtin_admin.elevation_cancelled", "已取消 Windows 管理员授权，未修改系统设置。");
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            return Failure("windows.builtin_admin.enable_failed", "无法启用内置 Administrator 兼容模式。");
+        }
     }
 
     public async Task<OperationResult<Unit>> PrepareCodexAsync(

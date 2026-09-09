@@ -94,6 +94,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void EnableAdministratorCompatibilityButton_Click(object sender, RoutedEventArgs e)
+    {
+        var confirmed = MessageBox.Show(
+            this,
+            "此操作会为内置 Administrator（SID 末尾 -500）启用管理员批准模式，并登记本助手在下次登录后自动打开。\n\nWindows 会在 15 秒后自动重启，请先保存所有工作。是否继续？",
+            "启用兼容模式并重启",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirmed != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        var result = await RunUiAsync(() =>
+            viewModel.EnableBuiltInAdministratorCompatibilityAsync(lifetime.Token));
+        if (result is { IsSuccess: false, ErrorMessage: not null })
+        {
+            MessageBox.Show(
+                this,
+                result.ErrorMessage,
+                "未能启用兼容模式",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
     private void ReturnToInstallButton_Click(object sender, RoutedEventArgs e) =>
         viewModel.ReturnToInstallStep();
 

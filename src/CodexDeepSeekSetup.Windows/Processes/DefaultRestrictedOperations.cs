@@ -7,11 +7,25 @@ using CodexDeepSeekSetup.Windows.Storage;
 namespace CodexDeepSeekSetup.Windows.Processes;
 
 [SupportedOSPlatform("windows")]
-public sealed class DefaultRestrictedOperations(
-    ISecretStore secretStore,
-    CodexPackageVerifier packageVerifier,
-    IProcessRunner processRunner) : IRestrictedOperations
+public sealed class DefaultRestrictedOperations : IRestrictedOperations
 {
+    private readonly ISecretStore secretStore;
+    private readonly CodexPackageVerifier packageVerifier;
+    private readonly IProcessRunner processRunner;
+    private readonly Func<string?> processPathProvider;
+
+    public DefaultRestrictedOperations(
+        ISecretStore secretStore,
+        CodexPackageVerifier packageVerifier,
+        IProcessRunner processRunner,
+        Func<string?>? processPathProvider = null)
+    {
+        this.secretStore = secretStore;
+        this.packageVerifier = packageVerifier;
+        this.processRunner = processRunner;
+        this.processPathProvider = processPathProvider ?? (() => Environment.ProcessPath);
+    }
+
     private sealed record AppxVolumeRequest(string DriveRoot);
 
     public Task<int> ReadCredentialAsync(
@@ -107,6 +121,58 @@ public sealed class DefaultRestrictedOperations(
             new Dictionary<string, string?> { ["CODEX_SETUP_SERVICE"] = serviceName },
             cancellationToken).ConfigureAwait(false);
         return result.ExitCode;
+    }
+
+    public async Task<int> EnableBuiltInAdministratorCompatibilityAsync(
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        var relaunchPath = processPathProvider();
+        if (string.IsNullOrWhiteSpace(relaunchPath) ||
+            !File.Exists(relaunchPath) ||
+            !string.Equals(Path.GetFileName(relaunchPath), "CodexDeepSeekSetup.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            error.Write("无法确定安装助手的自动重开路径。");
+            return 65;
+        }
+
+        const string script = """
+            $ErrorActionPreference='Stop'
+            $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            if(-not $sid.EndsWith('-500')){exit 65}
+            $policy='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+            $enableLua=(Get-ItemProperty -Path $policy -Name 'EnableLUA' -ErrorAction Stop).EnableLUA
+            if($enableLua -ne 1){exit 66}
+            New-ItemProperty -Path $policy -Name 'FilterAdministratorToken' -PropertyType DWord -Value 1 -Force | Out-Null
+            $runOnce='HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+            New-Item -Path $runOnce -Force | Out-Null
+            $quoted='"' + $env:CODEX_SETUP_RELAUNCH + '"'
+            New-ItemProperty -Path $runOnce -Name 'CodexDeepSeekSetupResume' -PropertyType String -Value $quoted -Force | Out-Null
+            shutdown.exe /r /t 15 /d p:4:1 /c "Codex 安装助手正在启用内置 Administrator 兼容模式"
+            if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+            """;
+        var result = await processRunner.RunAsync(
+            "powershell.exe",
+            ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            new Dictionary<string, string?>
+            {
+                ["CODEX_SETUP_RELAUNCH"] = Path.GetFullPath(relaunchPath)
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            error.Write(result.ExitCode switch
+            {
+                65 => "只有内置 Administrator（SID 末尾 -500）需要执行此操作。",
+                66 => "Windows UAC 已关闭，请先恢复 EnableLUA=1 并重启。",
+                _ => "无法启用内置 Administrator 兼容模式或安排重启。"
+            });
+            return result.ExitCode;
+        }
+
+        output.Write("兼容模式已启用，已安排重启。");
+        return 0;
     }
 
     public async Task<int> PrepareAppxVolumeAsync(
