@@ -128,7 +128,7 @@
                         Background="White" CornerRadius="12" Padding="28">
                     <StackPanel>
                         <TextBlock Text="第 2 步 · 配置 DeepSeek" FontSize="24" FontWeight="SemiBold" />
-                        <TextBlock Text="按下面顺序完成，API Key 只会保存在当前 Windows 用户的凭据管理器中。" TextWrapping="Wrap" Margin="0,10,0,16" Foreground="#475569" />
+                        <TextBlock Text="按下面顺序完成，API Key 只会保存在当前 Windows 用户的凭据管理器中。点击验证后通常在 30 秒内完成；失败会直接显示具体原因。" TextWrapping="Wrap" Margin="0,10,0,16" Foreground="#475569" />
                         <Border Background="#F8FAFC" CornerRadius="8" Padding="16">
                             <StackPanel>
                                 <TextBlock Text="1. 登录 DeepSeek 官方平台并完成实名认证" Margin="0,0,0,8" />
@@ -142,7 +142,13 @@
                         </StackPanel>
                         <TextBlock Text="粘贴 DeepSeek API Key" FontWeight="SemiBold" Margin="0,18,0,6" />
                         <PasswordBox x:Name="ApiKeyBox" Height="42" Padding="11,8" PasswordChar="●" ToolTip="粘贴 sk- 开头的 DeepSeek API Key" />
-                        <Button Content="验证并配置 Codex" Click="ConfigureButton_Click" IsEnabled="{Binding CanConfigure}" Background="#059669" Foreground="White" HorizontalAlignment="Left" Margin="0,14,0,0" />
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button Content="验证并配置 Codex" Click="ConfigureButton_Click" IsEnabled="{Binding CanConfigure}" Background="#059669" Foreground="White" />
+                            <Button Content="返回第 1 步测试下载" Click="ReturnToInstallButton_Click" IsEnabled="{Binding CanConfigure}" />
+                        </StackPanel>
+                        <Border Background="#EFF6FF" CornerRadius="8" Padding="12" Margin="0,12,0,0">
+                            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#1E3A8A" />
+                        </Border>
                     </StackPanel>
                 </Border>
 

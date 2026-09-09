@@ -400,6 +400,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return result;
     }
 
+    public void ReturnToInstallStep()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        CurrentStep = WizardStep.Welcome;
+        InstallStage = CodexInstallStage.NotDownloaded;
+        CanUsePortable = false;
+        StatusMessage = "已返回第 1 步，可以重新测试官方文件下载";
+    }
+
     public Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken) =>
         CurrentStep == WizardStep.Complete
             ? RunAsync("正在启动并检查 Codex 窗口…", "Codex 已启动", actions.LaunchAsync, cancellationToken)

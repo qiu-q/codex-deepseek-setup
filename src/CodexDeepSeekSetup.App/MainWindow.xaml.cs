@@ -86,7 +86,14 @@ public partial class MainWindow : Window
         {
             ApiKeyBox.Clear();
         }
+        else if (result is { ErrorMessage: not null })
+        {
+            MessageBox.Show(this, result.ErrorMessage, "DeepSeek 配置未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
+
+    private void ReturnToInstallButton_Click(object sender, RoutedEventArgs e) =>
+        viewModel.ReturnToInstallStep();
 
     private async void LaunchButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.LaunchAsync(lifetime.Token));

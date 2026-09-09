@@ -366,20 +366,22 @@ public sealed class DesktopSetupActions : IWizardActions
             return Failure("wizard.order", "请先完成 Codex 安装。");
         }
 
-        var cli = await PrepareCliAsync(cancellationToken).ConfigureAwait(false);
+        OperationResult<string> cli;
+        using (var cliTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            cliTimeout.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                cli = await PrepareCliAsync(cliTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return Failure("cli.prepare.timeout", "检查 Codex CLI 超时。请关闭正在运行的 Codex 后重试。");
+            }
+        }
         if (!cli.IsSuccess)
         {
             return Failure(cli.ErrorCode!, cli.ErrorMessage!);
-        }
-
-        var account = await deepSeek.ValidateAsync(apiKey, cancellationToken).ConfigureAwait(false);
-        if (!account.IsSuccess)
-        {
-            return Failure(account.ErrorCode!, account.ErrorMessage!);
-        }
-        if (!account.Value!.IsAvailable)
-        {
-            return Failure("deepseek.balance.insufficient", "DeepSeek 账户当前不可用，请先完成实名认证并充值。");
         }
 
         var modelTest = await deepSeek.TestResponseAsync(apiKey, "deepseek-v4-flash", cancellationToken)
@@ -444,41 +446,6 @@ public sealed class DesktopSetupActions : IWizardActions
             return RestoreCredential(previousCredential).IsSuccess
                 ? Failure(configured.ErrorCode!, configured.ErrorMessage!)
                 : Failure("credential.rollback.failed", "配置失败，而且原有 Windows 凭据未能恢复，请打开凭据管理器检查。");
-        }
-
-        ProcessResult cliCheck;
-        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-        {
-            timeout.CancelAfter(TimeSpan.FromSeconds(90));
-            try
-            {
-                cliCheck = await processRunner.RunAsync(
-                    cli.Value!,
-                    ["-a", "never", "-s", "read-only", "exec", "--ephemeral", "--skip-git-repo-check", "只回复：Codex DeepSeek 配置成功"],
-                    null,
-                    timeout.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                await configService.RestoreAsync(configured.Value!, CancellationToken.None).ConfigureAwait(false);
-                RestoreCredential(previousCredential);
-                return Failure("codex.validation.timeout", "Codex CLI 配置验证超时，已恢复原配置和原凭据。");
-            }
-            catch (OperationCanceledException)
-            {
-                await configService.RestoreAsync(configured.Value!, CancellationToken.None).ConfigureAwait(false);
-                RestoreCredential(previousCredential);
-                throw;
-            }
-        }
-
-        if (cliCheck.ExitCode != 0)
-        {
-            var restoredConfig = await configService.RestoreAsync(configured.Value!, cancellationToken).ConfigureAwait(false);
-            var restoredCredential = RestoreCredential(previousCredential);
-            return restoredConfig.IsSuccess && restoredCredential.IsSuccess
-                ? Failure("codex.validation.failed", "Codex 未能通过新配置调用 DeepSeek，已恢复原配置和原凭据。")
-                : Failure("codex.rollback.failed", "Codex 配置验证失败，自动恢复也未完全成功，请使用备份目录手动恢复。");
         }
 
         installState ??= CreateInstallState(
