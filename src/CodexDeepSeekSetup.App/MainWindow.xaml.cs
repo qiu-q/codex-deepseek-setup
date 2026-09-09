@@ -163,7 +163,15 @@ public partial class MainWindow : Window
 
     private void OpenLink_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string url })
+        var url = sender is Button button
+            ? button.Tag switch
+            {
+                Uri uri => uri.AbsoluteUri,
+                string value => value,
+                _ => null
+            }
+            : null;
+        if (!string.IsNullOrWhiteSpace(url))
         {
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }

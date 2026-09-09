@@ -216,6 +216,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<InstallDriveChoice> InstallDriveChoices => actions.InstallDriveChoices;
 
+    public IReadOnlyList<DeepSeekGuideItem> DeepSeekGuideItems => DeepSeekGuideCatalog.Items;
+
     public string DownloadDirectory => actions.DownloadDirectory;
 
     public string SelectedInstallDrive

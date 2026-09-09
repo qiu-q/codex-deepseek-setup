@@ -1,6 +1,7 @@
 <Window x:Class="CodexDeepSeekSetup.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:CodexDeepSeekSetup.App"
         Title="Codex + DeepSeek 安装助手" Width="920" Height="760"
         MinWidth="800" MinHeight="650" WindowStartupLocation="CenterScreen"
         Background="#F4F7FB" FontFamily="Microsoft YaHei UI"
@@ -204,17 +205,21 @@
                     <StackPanel>
                         <TextBlock Text="第 2 步 · 配置 DeepSeek" FontSize="24" FontWeight="SemiBold" />
                         <TextBlock Text="按下面顺序完成，API Key 只会保存在当前 Windows 用户的凭据管理器中。点击验证后通常在 30 秒内完成；失败会直接显示具体原因。" TextWrapping="Wrap" Margin="0,10,0,16" Foreground="#475569" />
-                        <Border Background="#F8FAFC" CornerRadius="8" Padding="16">
-                            <StackPanel>
-                                <TextBlock Text="1. 登录 DeepSeek 官方平台并完成实名认证" Margin="0,0,0,8" />
-                                <TextBlock Text="2. 给 API 账户充值可用余额" Margin="0,0,0,8" />
-                                <TextBlock Text="3. 打开 API Keys 页面，创建并复制 sk- 开头的 Key" />
-                            </StackPanel>
+                        <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="12">
+                            <local:DeepSeekVisualGuide x:Name="DeepSeekVisualGuidePanel" />
                         </Border>
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="打开 DeepSeek 平台" Tag="https://platform.deepseek.com/" Click="OpenLink_Click" />
-                            <Button Content="打开 API Keys" Tag="https://platform.deepseek.com/api_keys" Click="OpenLink_Click" />
-                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding DeepSeekGuideItems}" Margin="0,10,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Content="{Binding ActionLabel}" Tag="{Binding Url}" Click="OpenLink_Click" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <TextBlock Text="粘贴 DeepSeek API Key" FontWeight="SemiBold" Margin="0,18,0,6" />
                         <PasswordBox x:Name="ApiKeyBox" Height="42" Padding="11,8" PasswordChar="●" ToolTip="粘贴 sk- 开头的 DeepSeek API Key" />
                         <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
