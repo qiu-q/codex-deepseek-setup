@@ -247,21 +247,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             "准备安装 Codex",
             actions.CheckAsync,
             cancellationToken);
+        if (actions.IsCodexInstalled)
+        {
+            AdvanceInstalledCodexToConfiguration(
+                result,
+                "Codex 已安装，下一步请准备 DeepSeek API Key");
+            return OperationResult<Unit>.Success(default);
+        }
         if (!result.IsSuccess)
         {
             return result;
         }
 
-        if (actions.IsCodexInstalled)
-        {
-            CurrentStep = WizardStep.DeepSeek;
-            StatusMessage = "Codex 已安装，下一步请准备 DeepSeek API Key";
-        }
-        else
-        {
-            CurrentStep = WizardStep.Welcome;
-            StatusMessage = "准备安装 Codex";
-        }
+        CurrentStep = WizardStep.Welcome;
+        StatusMessage = "准备安装 Codex";
         RaiseActionMetadata();
         RaiseStorageProperties();
         return result;
@@ -270,14 +269,28 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public async Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken)
     {
         var result = await RunAsync("正在检查 Windows…", "检查通过，可以下载安装", actions.CheckAsync, cancellationToken);
-        if (result.IsSuccess && actions.IsCodexInstalled)
+        if (actions.IsCodexInstalled)
         {
-            CurrentStep = WizardStep.DeepSeek;
-            StatusMessage = "检测到 Codex 已安装，可以直接配置 DeepSeek";
+            AdvanceInstalledCodexToConfiguration(
+                result,
+                "检测到 Codex 已安装，可以直接配置 DeepSeek");
+            return OperationResult<Unit>.Success(default);
         }
         RaiseActionMetadata();
         RaiseStorageProperties();
         return result;
+    }
+
+    private void AdvanceInstalledCodexToConfiguration(
+        OperationResult<Unit> readinessResult,
+        string successMessage)
+    {
+        CurrentStep = WizardStep.DeepSeek;
+        StatusMessage = readinessResult.IsSuccess
+            ? successMessage
+            : $"检测到 Codex 已安装，可以继续配置 DeepSeek。启动兼容提示：{readinessResult.ErrorMessage}";
+        RaiseActionMetadata();
+        RaiseStorageProperties();
     }
 
     public OperationResult<Unit> SelectDownloadDirectory(string directory)

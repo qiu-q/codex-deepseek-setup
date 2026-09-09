@@ -35,6 +35,27 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task InitializeAsync_WhenInstalledCodexHasBuiltInAdminWarning_StillAdvancesToConfigureStep()
+    {
+        var actions = new FakeActions
+        {
+            IsCodexInstalled = true,
+            CheckFailure = OperationResult<Unit>.Failure(
+                "windows.builtin_admin.restricted",
+                "内置 Administrator 需要启用管理员批准模式并重启。")
+        };
+        var viewModel = new MainWindowViewModel(actions);
+
+        var result = await viewModel.InitializeAsync(default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(viewModel.IsConfigureStep);
+        Assert.True(viewModel.CanConfigure);
+        Assert.Contains("可以继续配置 DeepSeek", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("管理员批准模式", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SelectDownloadDirectory_UpdatesVisibleLocationAndAction()
     {
         var actions = new FakeActions();
@@ -345,6 +366,7 @@ public sealed class MainWindowViewModelTests
         public string? InstallFailureCode { get; init; }
         public bool LaunchSucceeds { get; init; } = true;
         public bool CleanupSucceeds { get; init; } = true;
+        public OperationResult<Unit>? CheckFailure { get; init; }
         public bool LaunchWasCalled { get; private set; }
         public bool PortableInstallWasCalled { get; private set; }
         public bool CleanupWasCalled { get; private set; }
@@ -365,7 +387,8 @@ public sealed class MainWindowViewModelTests
             SelectedInstallDrive = driveRoot;
             return OperationResult<Unit>.Success(default);
         }
-        public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) => Ok();
+        public Task<OperationResult<Unit>> CheckAsync(CancellationToken cancellationToken) =>
+            CheckFailure is null ? Ok() : Task.FromResult(CheckFailure);
         public Task<OperationResult<Unit>> PrepareCodexAsync(IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
             PrepareCallCount++;
