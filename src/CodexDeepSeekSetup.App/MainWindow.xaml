@@ -91,7 +91,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="安装包保存到" VerticalAlignment="Center" />
-                                    <TextBox x:Name="DownloadDirectoryTextBox" Grid.Column="1" Text="{Binding DownloadDirectory}" IsReadOnly="True" Padding="9,7" VerticalContentAlignment="Center" />
+                                    <TextBox x:Name="DownloadDirectoryTextBox" Grid.Column="1" Text="{Binding DownloadDirectory, Mode=OneWay}" IsReadOnly="True" Padding="9,7" VerticalContentAlignment="Center" />
                                     <Button x:Name="BrowseDownloadDirectoryButton" Grid.Column="2" Content="选择目录" Click="BrowseDownloadDirectoryButton_Click" Margin="10,0,0,0" />
                                 </Grid>
                                 <Grid Margin="0,10,0,0">
