@@ -1,5 +1,6 @@
 using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Advertisements;
+using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Tests.ViewModels;
@@ -248,7 +249,7 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Flavor_NeverEnablesProxyOrEmbeddedKey_AndOnlyInternalEnablesAdvertisements()
+    public void Flavor_NeverEnablesProxyOrEmbeddedKey_AndOnlyInternalEnablesRemoteContent()
     {
         var openSource = BuildFlavorOptions.For(BuildFlavor.OpenSource);
         var internalBuild = BuildFlavorOptions.For(BuildFlavor.Internal);
@@ -256,11 +257,50 @@ public sealed class MainWindowViewModelTests
         Assert.False(openSource.EnableProxyConfiguration);
         Assert.Null(openSource.EmbeddedApiKey);
         Assert.Null(openSource.AdvertisementEndpoint);
+        Assert.Null(openSource.GuideEndpoint);
         Assert.False(internalBuild.EnableProxyConfiguration);
         Assert.Null(internalBuild.EmbeddedApiKey);
         Assert.Equal(
             "https://www.qiuqiuqiu.top/xxx/codex-ad/",
             internalBuild.AdvertisementEndpoint?.AbsoluteUri);
+        Assert.Equal(
+            "https://www.qiuqiuqiu.top/xxx/codex-ad/",
+            internalBuild.GuideEndpoint?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task LoadGuideAsync_UsesRemoteGuideAndAutoOpensOnlyOnce()
+    {
+        var remote = new GuideDocument("Remote guide",
+        [
+            new GuideStep("remote", "Remote", "Body", "Done", "Open", new Uri("https://example.com"), null)
+        ]);
+        var viewModel = new MainWindowViewModel(
+            new FakeActions { IsCodexInstalled = true },
+            guideClient: new FakeGuideClient(remote));
+        await viewModel.InitializeAsync(default);
+
+        await viewModel.LoadGuideAsync(default);
+
+        Assert.Same(remote, viewModel.CurrentGuide);
+        Assert.True(viewModel.ShouldAutomaticallyOpenGuide);
+        Assert.True(viewModel.ConsumeAutomaticGuideRequest());
+        Assert.False(viewModel.ShouldAutomaticallyOpenGuide);
+        Assert.False(viewModel.ConsumeAutomaticGuideRequest());
+    }
+
+    [Fact]
+    public async Task LoadGuideAsync_UsesBuiltInGuideWhenRemoteIsUnavailable()
+    {
+        var viewModel = new MainWindowViewModel(
+            new FakeActions { IsCodexInstalled = true },
+            guideClient: new FakeGuideClient(null));
+        await viewModel.InitializeAsync(default);
+
+        await viewModel.LoadGuideAsync(default);
+
+        Assert.Same(DeepSeekGuideCatalog.Document, viewModel.CurrentGuide);
+        Assert.Equal(4, viewModel.CurrentGuide.Steps.Count);
     }
 
     [Fact]
@@ -445,6 +485,11 @@ public sealed class MainWindowViewModelTests
             Events.Add((campaignId, eventType));
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeGuideClient(GuideDocument? document) : IGuideClient
+    {
+        public Task<GuideDocument?> GetCurrentAsync(CancellationToken cancellationToken) => Task.FromResult(document);
     }
 
     private sealed class FakeActions : IWizardActions

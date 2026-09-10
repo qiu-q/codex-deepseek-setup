@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using CodexDeepSeekSetup.Core.Advertisements;
+using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Logic;
@@ -50,6 +51,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private const int MaximumProgressEntries = 200;
     private readonly IWizardActions actions;
     private readonly IAdvertisementClient? advertisementClient;
+    private readonly IGuideClient? guideClient;
     private readonly Func<DateTimeOffset> clock;
     private WizardStep currentStep = WizardStep.Welcome;
     private string statusMessage = "准备检查这台电脑";
@@ -73,15 +75,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private AdCampaign? currentAdvertisement;
     private bool isAdvertisementVisible;
     private bool isCodexLaunched;
+    private GuideDocument currentGuide = DeepSeekGuideCatalog.Document;
+    private bool guideLoaded;
+    private bool automaticGuideRequestConsumed;
 
     public MainWindowViewModel(
         IWizardActions actions,
         Func<DateTimeOffset>? clock = null,
-        IAdvertisementClient? advertisementClient = null)
+        IAdvertisementClient? advertisementClient = null,
+        IGuideClient? guideClient = null)
     {
         this.actions = actions;
         this.clock = clock ?? (() => DateTimeOffset.Now);
         this.advertisementClient = advertisementClient;
+        this.guideClient = guideClient;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -256,7 +263,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<InstallDriveChoice> InstallDriveChoices => actions.InstallDriveChoices;
 
-    public IReadOnlyList<DeepSeekGuideItem> DeepSeekGuideItems => DeepSeekGuideCatalog.Items;
+    public GuideDocument CurrentGuide
+    {
+        get => currentGuide;
+        private set => Set(ref currentGuide, value);
+    }
+
+    public IReadOnlyList<GuideStep> DeepSeekGuideItems => CurrentGuide.Steps;
+
+    public bool ShouldAutomaticallyOpenGuide =>
+        IsConfigureStep && guideLoaded && !automaticGuideRequestConsumed;
 
     public string DownloadDirectory => actions.DownloadDirectory;
 
@@ -644,6 +660,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         await advertisementClient.TrackAsync(campaign.CampaignId, AdEventType.Impression, cancellationToken);
     }
 
+    public async Task LoadGuideAsync(CancellationToken cancellationToken)
+    {
+        if (guideLoaded)
+        {
+            return;
+        }
+
+        var remote = guideClient is null
+            ? null
+            : await guideClient.GetCurrentAsync(cancellationToken);
+        CurrentGuide = remote ?? DeepSeekGuideCatalog.Document;
+        guideLoaded = true;
+        OnPropertyChanged(nameof(DeepSeekGuideItems));
+        OnPropertyChanged(nameof(ShouldAutomaticallyOpenGuide));
+    }
+
+    public bool ConsumeAutomaticGuideRequest()
+    {
+        if (!ShouldAutomaticallyOpenGuide)
+        {
+            return false;
+        }
+        automaticGuideRequestConsumed = true;
+        OnPropertyChanged(nameof(ShouldAutomaticallyOpenGuide));
+        return true;
+    }
+
     public void DismissAdvertisement()
     {
         IsAdvertisementVisible = false;
@@ -799,6 +842,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsInstallStep));
         OnPropertyChanged(nameof(IsConfigureStep));
         OnPropertyChanged(nameof(IsCompleteStep));
+        OnPropertyChanged(nameof(ShouldAutomaticallyOpenGuide));
         RaiseCommandProperties();
     }
 

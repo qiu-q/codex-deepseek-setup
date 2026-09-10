@@ -1,24 +1,27 @@
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.Core.Guides;
 
 namespace CodexDeepSeekSetup.App.Tests.ViewModels;
 
 public sealed class DeepSeekGuideCatalogTests
 {
     [Fact]
-    public void Items_ProvideFourOrderedOfficialDeepSeekActions()
+    public void Document_ProvidesFourOrderedOfficialDeepSeekActions()
     {
-        var items = DeepSeekGuideCatalog.Items;
+        var document = DeepSeekGuideCatalog.Document;
+        var items = document.Steps;
 
-        Assert.Equal([1, 2, 3, 4], items.Select(item => item.Number));
+        Assert.Equal(["sign-in", "identity", "top-up", "api-key"], items.Select(item => item.Id));
         Assert.Equal(4, items.Count);
-        Assert.Contains(items, item => item.Url.AbsolutePath == "/sign_in");
-        Assert.Contains(items, item => item.Url.AbsolutePath == "/top_up");
-        Assert.Contains(items, item => item.Url.AbsolutePath == "/api_keys");
+        Assert.Contains(items, item => item.ActionUrl.AbsolutePath == "/sign_in");
+        Assert.Contains(items, item => item.ActionUrl.AbsolutePath == "/top_up");
+        Assert.Contains(items, item => item.ActionUrl.AbsolutePath == "/api_keys");
         Assert.All(items, item =>
         {
-            Assert.Equal(Uri.UriSchemeHttps, item.Url.Scheme);
-            Assert.Equal("platform.deepseek.com", item.Url.Host);
-            Assert.False(string.IsNullOrWhiteSpace(item.ActionLabel));
+            Assert.Equal(Uri.UriSchemeHttps, item.ActionUrl.Scheme);
+            Assert.Equal("platform.deepseek.com", item.ActionUrl.Host);
+            Assert.False(string.IsNullOrWhiteSpace(item.ActionText));
+            Assert.False(string.IsNullOrWhiteSpace(item.CompletionHint));
         });
     }
 }
