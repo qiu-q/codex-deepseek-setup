@@ -1,0 +1,32 @@
+<Window x:Class="CodexDeepSeekSetup.App.GuideDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DeepSeek 操作引导" Width="680" Height="560" MinWidth="580" MinHeight="500"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{StaticResource PageBrush}" FontFamily="Microsoft YaHei UI"
+        ContentRendered="GuideDialog_ContentRendered">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition Height="*"/><RowDefinition Height="68"/></Grid.RowDefinitions>
+        <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="22,0">
+            <Grid><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Document.Title}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding PositionText}" Foreground="{StaticResource MutedTextBrush}" Margin="0,3,0,0"/></StackPanel><Button x:Name="DismissGuideButton" Content="×" Click="DismissGuideButton_Click" Width="34" Height="34" Padding="0" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" ToolTip="关闭引导"/></Grid>
+        </Border>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <Border Style="{StaticResource CardBorder}" Margin="22">
+                <StackPanel>
+                    <Grid Height="220">
+                        <Border x:Name="GuideImageFrame" Background="#F5F7FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+                            <Image x:Name="GuideImage" Stretch="Uniform" Visibility="Collapsed"/>
+                        </Border>
+                        <StackPanel x:Name="GuideImageFallback" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="操作步骤" FontSize="42" Foreground="#C0C4CC" HorizontalAlignment="Center"/><TextBlock Text="图片不可用时不影响继续" Foreground="{StaticResource MutedTextBrush}" Margin="0,8,0,0"/></StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding CurrentStep.Title}" FontSize="22" FontWeight="SemiBold" Margin="0,20,0,0"/>
+                    <TextBlock Text="{Binding CurrentStep.Body}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}" FontSize="14" LineHeight="23" Margin="0,9,0,0"/>
+                    <Border Style="{StaticResource InfoAlert}" Margin="0,16,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="✓" Foreground="{StaticResource SuccessBrush}" FontWeight="Bold" Margin="0,0,8,0"/><TextBlock Text="完成条件：" Foreground="#337ECC"/><TextBlock Text="{Binding CurrentStep.CompletionHint}" TextWrapping="Wrap" Foreground="#337ECC"/></StackPanel></Border>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="22,14">
+            <Grid><Button Content="稍后再看" Click="DismissGuideButton_Click" HorizontalAlignment="Left"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="PreviousGuideButton" Content="上一步" Click="PreviousGuideButton_Click" IsEnabled="{Binding CanGoPrevious}"/><Button x:Name="OpenGuideActionButton" Content="{Binding CurrentStep.ActionText}" Click="OpenGuideActionButton_Click"/><Button x:Name="NextGuideButton" Content="{Binding NextButtonText}" Click="NextGuideButton_Click" Style="{StaticResource PrimaryButton}" Margin="0"/></StackPanel></Grid>
+        </Border>
+    </Grid>
+</Window>

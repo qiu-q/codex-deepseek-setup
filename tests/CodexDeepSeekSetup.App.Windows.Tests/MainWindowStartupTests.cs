@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Windows.Tests;
@@ -40,7 +41,7 @@ public sealed class MainWindowStartupTests
                 Assert.IsType<Button>(window.FindName("BrowseDownloadDirectoryButton"));
                 Assert.IsType<Button>(window.FindName("OpenMaintenanceButton"));
                 Assert.IsType<Button>(window.FindName("EnableAdministratorCompatibilityButton"));
-                Assert.IsType<DeepSeekVisualGuide>(window.FindName("DeepSeekVisualGuidePanel"));
+                Assert.IsType<Button>(window.FindName("ShowGuideButton"));
                 var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
                 var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
                 var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));
@@ -71,6 +72,44 @@ public sealed class MainWindowStartupTests
         thread.Start();
 
         Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "MainWindow structure check timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void GuideDialog_ContainsDismissibleStepNavigation()
+    {
+        Exception? failure = null;
+        using var completed = new ManualResetEventSlim();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application();
+                var document = new GuideDocument("Guide",
+                [
+                    new GuideStep("one", "One", "Body", "Done", "Open", new Uri("https://example.com"), null)
+                ]);
+                var window = new GuideDialog(document, null);
+                Assert.IsType<Button>(window.FindName("DismissGuideButton"));
+                Assert.IsType<Button>(window.FindName("PreviousGuideButton"));
+                Assert.IsType<Button>(window.FindName("OpenGuideActionButton"));
+                Assert.IsType<Button>(window.FindName("NextGuideButton"));
+                Assert.IsType<Image>(window.FindName("GuideImage"));
+                window.Close();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "GuideDialog structure check timed out.");
         Assert.Null(failure);
     }
 

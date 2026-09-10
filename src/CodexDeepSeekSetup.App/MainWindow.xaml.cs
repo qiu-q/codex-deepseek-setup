@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Advertisements;
+using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App;
@@ -31,13 +32,21 @@ public partial class MainWindow : Window
         var options = BuildFlavorOptions.For(flavor);
         actions = DesktopSetupActions.Create(options);
         IAdvertisementClient? advertisementClient = null;
-        if (options.AdvertisementEndpoint is not null)
+        IGuideClient? guideClient = null;
+        if (options.AdvertisementEndpoint is not null || options.GuideEndpoint is not null)
         {
             advertisementHttp = new HttpClient();
-            advertisementClient = new AdvertisementClient(advertisementHttp, options.AdvertisementEndpoint);
             advertisementImageDownloader = new AdvertisementImageDownloader(advertisementHttp);
+            if (options.AdvertisementEndpoint is not null)
+            {
+                advertisementClient = new AdvertisementClient(advertisementHttp, options.AdvertisementEndpoint);
+            }
+            if (options.GuideEndpoint is not null)
+            {
+                guideClient = new GuideClient(advertisementHttp, options.GuideEndpoint);
+            }
         }
-        viewModel = new MainWindowViewModel(actions, advertisementClient: advertisementClient);
+        viewModel = new MainWindowViewModel(actions, advertisementClient: advertisementClient, guideClient: guideClient);
         DataContext = viewModel;
     }
 
@@ -50,6 +59,7 @@ public partial class MainWindow : Window
 
         initialized = true;
         await RunUiAsync(() => viewModel.InitializeAsync(lifetime.Token));
+        await ShowGuideIfNeededAsync();
     }
 
     protected override void OnClosed(EventArgs e)
@@ -60,8 +70,11 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void CheckButton_Click(object sender, RoutedEventArgs e) =>
+    private async void CheckButton_Click(object sender, RoutedEventArgs e)
+    {
         await RunUiAsync(() => viewModel.CheckAsync(lifetime.Token));
+        await ShowGuideIfNeededAsync();
+    }
 
     private async void DownloadButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.DownloadAsync(lifetime.Token));
@@ -78,6 +91,7 @@ public partial class MainWindow : Window
         if (confirmed == MessageBoxResult.Yes)
         {
             await RunUiAsync(() => viewModel.InstallAsync(lifetime.Token));
+            await ShowGuideIfNeededAsync();
         }
     }
 
@@ -92,6 +106,7 @@ public partial class MainWindow : Window
         if (confirmed == MessageBoxResult.Yes)
         {
             await RunUiAsync(() => viewModel.InstallPortableAsync(lifetime.Token));
+            await ShowGuideIfNeededAsync();
         }
     }
 
@@ -140,6 +155,9 @@ public partial class MainWindow : Window
 
     private void ReturnToInstallButton_Click(object sender, RoutedEventArgs e) =>
         viewModel.ReturnToInstallStep();
+
+    private async void ShowGuideButton_Click(object sender, RoutedEventArgs e) =>
+        await ShowGuideIfNeededAsync(force: true);
 
     private async void LaunchButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.LaunchAsync(lifetime.Token));
@@ -250,5 +268,32 @@ public partial class MainWindow : Window
         bitmap.Freeze();
         AdvertisementImage.Source = bitmap;
         AdvertisementImage.Visibility = Visibility.Visible;
+    }
+
+    private async Task ShowGuideIfNeededAsync(bool force = false)
+    {
+        if (!viewModel.IsConfigureStep)
+        {
+            return;
+        }
+        try
+        {
+            await viewModel.LoadGuideAsync(lifetime.Token);
+            if (force)
+            {
+                viewModel.ConsumeAutomaticGuideRequest();
+            }
+            else if (!viewModel.ConsumeAutomaticGuideRequest())
+            {
+                return;
+            }
+
+            var dialog = new GuideDialog(viewModel.CurrentGuide, advertisementImageDownloader) { Owner = this };
+            dialog.ShowDialog();
+            ApiKeyBox.Focus();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
     }
 }
