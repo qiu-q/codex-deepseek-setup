@@ -146,6 +146,8 @@ public sealed class DeepSeekClient
             HttpStatusCode.OK => null,
             HttpStatusCode.Unauthorized => OperationResult<T>.Failure("deepseek.auth.invalid", "API Key 无效"),
             HttpStatusCode.PaymentRequired => OperationResult<T>.Failure("deepseek.balance.insufficient", "账户余额不足"),
+            HttpStatusCode.NotFound or HttpStatusCode.UnprocessableEntity =>
+                OperationResult<T>.Failure("deepseek.api.incompatible", "DeepSeek API 接口或模型暂不兼容，请检查官方服务状态和模型配置"),
             (HttpStatusCode)429 => OperationResult<T>.Failure("deepseek.rate_limited", "请求过于频繁，请稍后重试"),
             >= HttpStatusCode.InternalServerError => OperationResult<T>.Failure("deepseek.service.unavailable", "DeepSeek 服务暂时不可用"),
             _ => OperationResult<T>.Failure("deepseek.request.failed", $"DeepSeek 请求失败（HTTP {(int)statusCode}）")

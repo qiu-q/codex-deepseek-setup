@@ -1,7 +1,11 @@
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Windows.Media.Imaging;
 using System.Windows;
 using System.Windows.Controls;
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.Core.Advertisements;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App;
@@ -10,6 +14,8 @@ public partial class MainWindow : Window
 {
     private readonly DesktopSetupActions actions;
     private readonly MainWindowViewModel viewModel;
+    private readonly HttpClient? advertisementHttp;
+    private readonly AdvertisementImageDownloader? advertisementImageDownloader;
     private readonly CancellationTokenSource lifetime = new();
     private bool initialized;
 
@@ -22,8 +28,16 @@ public partial class MainWindow : Window
 #else
             BuildFlavor.OpenSource;
 #endif
-        actions = DesktopSetupActions.Create(BuildFlavorOptions.For(flavor));
-        viewModel = new MainWindowViewModel(actions);
+        var options = BuildFlavorOptions.For(flavor);
+        actions = DesktopSetupActions.Create(options);
+        IAdvertisementClient? advertisementClient = null;
+        if (options.AdvertisementEndpoint is not null)
+        {
+            advertisementHttp = new HttpClient();
+            advertisementClient = new AdvertisementClient(advertisementHttp, options.AdvertisementEndpoint);
+            advertisementImageDownloader = new AdvertisementImageDownloader(advertisementHttp);
+        }
+        viewModel = new MainWindowViewModel(actions, advertisementClient: advertisementClient);
         DataContext = viewModel;
     }
 
@@ -42,6 +56,7 @@ public partial class MainWindow : Window
     {
         lifetime.Cancel();
         lifetime.Dispose();
+        advertisementHttp?.Dispose();
         base.OnClosed(e);
     }
 
@@ -87,6 +102,8 @@ public partial class MainWindow : Window
         if (result?.IsSuccess == true)
         {
             ApiKeyBox.Clear();
+            await viewModel.LoadAdvertisementAsync(lifetime.Token);
+            await LoadAdvertisementImageAsync();
         }
         else if (result is { ErrorMessage: not null })
         {
@@ -126,6 +143,22 @@ public partial class MainWindow : Window
 
     private async void LaunchButton_Click(object sender, RoutedEventArgs e) =>
         await RunUiAsync(() => viewModel.LaunchAsync(lifetime.Token));
+
+    private async void AdvertisementButton_Click(object sender, RoutedEventArgs e)
+    {
+        var target = await viewModel.TrackAdvertisementClickAsync(lifetime.Token);
+        if (target is not null)
+        {
+            Process.Start(new ProcessStartInfo(target.AbsoluteUri) { UseShellExecute = true });
+        }
+    }
+
+    private void DismissAdvertisementButton_Click(object sender, RoutedEventArgs e)
+    {
+        AdvertisementImage.Source = null;
+        AdvertisementImage.Visibility = Visibility.Collapsed;
+        viewModel.DismissAdvertisement();
+    }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
 
@@ -192,5 +225,30 @@ public partial class MainWindow : Window
             MessageBox.Show(this, "操作遇到未预期错误。请重新打开程序后重试。", "安装助手", MessageBoxButton.OK, MessageBoxImage.Error);
             return null;
         }
+    }
+
+    private async Task LoadAdvertisementImageAsync()
+    {
+        var imageUri = viewModel.CurrentAdvertisement?.ImageUrl;
+        if (imageUri is null || advertisementImageDownloader is null)
+        {
+            return;
+        }
+
+        var bytes = await advertisementImageDownloader.DownloadAsync(imageUri, lifetime.Token);
+        if (bytes is null || !viewModel.IsAdvertisementVisible)
+        {
+            return;
+        }
+
+        using var stream = new MemoryStream(bytes, writable: false);
+        var bitmap = new BitmapImage();
+        bitmap.BeginInit();
+        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.StreamSource = stream;
+        bitmap.EndInit();
+        bitmap.Freeze();
+        AdvertisementImage.Source = bitmap;
+        AdvertisementImage.Visibility = Visibility.Visible;
     }
 }

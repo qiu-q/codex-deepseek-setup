@@ -43,6 +43,8 @@ public sealed class DeepSeekClientTests
     [InlineData(HttpStatusCode.PaymentRequired, "deepseek.balance.insufficient")]
     [InlineData((HttpStatusCode)429, "deepseek.rate_limited")]
     [InlineData(HttpStatusCode.ServiceUnavailable, "deepseek.service.unavailable")]
+    [InlineData(HttpStatusCode.NotFound, "deepseek.api.incompatible")]
+    [InlineData(HttpStatusCode.UnprocessableEntity, "deepseek.api.incompatible")]
     public async Task ValidateAsync_MapsKnownHttpFailures(HttpStatusCode status, string expectedCode)
     {
         var result = await Create(status, "{}").ValidateAsync("sk-valid12345678", default);

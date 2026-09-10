@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Obfuscator>
+  <Var name="InPath" value="__INPUT_PATH__" />
+  <Var name="OutPath" value="__OUTPUT_PATH__" />
+  <Var name="KeepPublicApi" value="true" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="RenameProperties" value="false" />
+  <Var name="RenameEvents" value="false" />
+  <Var name="RenameFields" value="false" />
+  <Var name="UseUnicodeNames" value="false" />
+  <Var name="RegenerateDebugInfo" value="false" />
+  <Module file="$(InPath)/CodexDeepSeekSetup.Core.dll" />
+  <Module file="$(InPath)/CodexDeepSeekSetup.App.Logic.dll" />
+</Obfuscator>

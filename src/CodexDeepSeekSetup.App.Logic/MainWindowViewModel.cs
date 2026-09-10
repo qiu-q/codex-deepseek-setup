@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using CodexDeepSeekSetup.Core.Advertisements;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Logic;
@@ -48,6 +49,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
     private const int MaximumProgressEntries = 200;
     private readonly IWizardActions actions;
+    private readonly IAdvertisementClient? advertisementClient;
     private readonly Func<DateTimeOffset> clock;
     private WizardStep currentStep = WizardStep.Welcome;
     private string statusMessage = "准备检查这台电脑";
@@ -68,11 +70,18 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private CodexInstallStage installStage = CodexInstallStage.NotDownloaded;
     private DownloadRateEstimator rateEstimator = new();
     private string? lastProgressLogKey;
+    private AdCampaign? currentAdvertisement;
+    private bool isAdvertisementVisible;
+    private bool isCodexLaunched;
 
-    public MainWindowViewModel(IWizardActions actions, Func<DateTimeOffset>? clock = null)
+    public MainWindowViewModel(
+        IWizardActions actions,
+        Func<DateTimeOffset>? clock = null,
+        IAdvertisementClient? advertisementClient = null)
     {
         this.actions = actions;
         this.clock = clock ?? (() => DateTimeOffset.Now);
+        this.advertisementClient = advertisementClient;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -182,6 +191,37 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool CanLaunch => IsCompleteStep && !IsBusy;
 
     public bool CanCleanup => IsCompleteStep && !IsBusy && !ShouldExit;
+
+    public AdCampaign? CurrentAdvertisement
+    {
+        get => currentAdvertisement;
+        private set => Set(ref currentAdvertisement, value);
+    }
+
+    public bool IsAdvertisementVisible
+    {
+        get => isAdvertisementVisible;
+        private set => Set(ref isAdvertisementVisible, value);
+    }
+
+    public bool IsCodexLaunched
+    {
+        get => isCodexLaunched;
+        private set
+        {
+            if (Set(ref isCodexLaunched, value))
+            {
+                OnPropertyChanged(nameof(LaunchButtonText));
+                OnPropertyChanged(nameof(CompletionNextStep));
+            }
+        }
+    }
+
+    public string LaunchButtonText => IsCodexLaunched ? "Codex 已启动" : "启动 Codex";
+
+    public string CompletionNextStep => IsCodexLaunched
+        ? "Codex 窗口已经打开。现在可以新建任务并选择 DeepSeek 模型开始使用。"
+        : "下一步：点击“启动 Codex”，确认桌面窗口能够正常显示。";
 
     public bool CanOpenMaintenance => !IsBusy;
 
@@ -567,10 +607,62 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RaiseStorageProperties();
     }
 
-    public Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken) =>
-        CurrentStep == WizardStep.Complete
-            ? RunAsync("正在启动并检查 Codex 窗口…", "Codex 已启动", actions.LaunchAsync, cancellationToken)
-            : Task.FromResult(OperationResult<Unit>.Failure("wizard.order", "请先验证 API Key 并完成配置。"));
+    public async Task<OperationResult<Unit>> LaunchAsync(CancellationToken cancellationToken)
+    {
+        if (CurrentStep != WizardStep.Complete)
+        {
+            return OperationResult<Unit>.Failure("wizard.order", "请先验证 API Key 并完成配置。");
+        }
+
+        var result = await RunAsync(
+            "正在启动并检查 Codex 窗口…",
+            "Codex 已启动，可以开始创建任务",
+            actions.LaunchAsync,
+            cancellationToken);
+        if (result.IsSuccess)
+        {
+            IsCodexLaunched = true;
+        }
+        return result;
+    }
+
+    public async Task LoadAdvertisementAsync(CancellationToken cancellationToken)
+    {
+        if (!IsCompleteStep || advertisementClient is null || IsAdvertisementVisible)
+        {
+            return;
+        }
+
+        var campaign = await advertisementClient.GetCurrentAsync(cancellationToken);
+        if (campaign is null || !IsCompleteStep)
+        {
+            return;
+        }
+
+        CurrentAdvertisement = campaign;
+        IsAdvertisementVisible = true;
+        await advertisementClient.TrackAsync(campaign.CampaignId, AdEventType.Impression, cancellationToken);
+    }
+
+    public void DismissAdvertisement()
+    {
+        IsAdvertisementVisible = false;
+    }
+
+    public Uri? GetAdvertisementTarget() =>
+        IsAdvertisementVisible ? CurrentAdvertisement?.TargetUrl : null;
+
+    public async Task<Uri?> TrackAdvertisementClickAsync(CancellationToken cancellationToken)
+    {
+        var campaign = IsAdvertisementVisible ? CurrentAdvertisement : null;
+        if (campaign is null || advertisementClient is null)
+        {
+            return null;
+        }
+
+        await advertisementClient.TrackAsync(campaign.CampaignId, AdEventType.Click, cancellationToken);
+        return campaign.TargetUrl;
+    }
 
     public async Task<OperationResult<Unit>> CleanupAsync(CancellationToken cancellationToken)
     {

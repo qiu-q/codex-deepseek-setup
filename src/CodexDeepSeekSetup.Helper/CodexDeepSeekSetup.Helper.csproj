@@ -4,8 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <AssemblyName>CodexDeepSeekSetup.Helper</AssemblyName>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
   </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\CodexDeepSeekSetup.Windows\CodexDeepSeekSetup.Windows.csproj" />
-  </ItemGroup>
 </Project>

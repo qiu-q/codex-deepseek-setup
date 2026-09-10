@@ -1,4 +1,5 @@
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.Core.Advertisements;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Tests.ViewModels;
@@ -247,14 +248,75 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Flavor_NeverEnablesProxyOrEmbeddedKey()
+    public void Flavor_NeverEnablesProxyOrEmbeddedKey_AndOnlyInternalEnablesAdvertisements()
     {
-        foreach (var flavor in Enum.GetValues<BuildFlavor>())
+        var openSource = BuildFlavorOptions.For(BuildFlavor.OpenSource);
+        var internalBuild = BuildFlavorOptions.For(BuildFlavor.Internal);
+
+        Assert.False(openSource.EnableProxyConfiguration);
+        Assert.Null(openSource.EmbeddedApiKey);
+        Assert.Null(openSource.AdvertisementEndpoint);
+        Assert.False(internalBuild.EnableProxyConfiguration);
+        Assert.Null(internalBuild.EmbeddedApiKey);
+        Assert.Equal(
+            "https://www.qiuqiuqiu.top/xxx/codex-ad/",
+            internalBuild.AdvertisementEndpoint?.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task LoadAdvertisementAsync_OnCompletedInternalFlow_ShowsAndTracksCampaign()
+    {
+        var advertisement = new FakeAdvertisementClient
         {
-            var options = BuildFlavorOptions.For(flavor);
-            Assert.False(options.EnableProxyConfiguration);
-            Assert.Null(options.EmbeddedApiKey);
-        }
+            Campaign = new AdCampaign(
+                "campaign-1",
+                "推广标题",
+                "推广内容",
+                "了解详情",
+                new Uri("https://example.com/product"),
+                null,
+                null,
+                null)
+        };
+        var viewModel = await CreateCompletedViewModelAsync(new FakeActions(), advertisement);
+
+        await viewModel.LoadAdvertisementAsync(default);
+
+        Assert.True(viewModel.IsAdvertisementVisible);
+        Assert.Equal("推广标题", viewModel.CurrentAdvertisement?.Title);
+        Assert.Equal([("campaign-1", AdEventType.Impression)], advertisement.Events);
+    }
+
+    [Fact]
+    public async Task DismissAdvertisement_HidesCampaignWithoutOpeningBrowser()
+    {
+        var advertisement = new FakeAdvertisementClient
+        {
+            Campaign = new AdCampaign("campaign-1", "t", "b", "go", new Uri("https://example.com"), null, null, null)
+        };
+        var viewModel = await CreateCompletedViewModelAsync(new FakeActions(), advertisement);
+        await viewModel.LoadAdvertisementAsync(default);
+
+        viewModel.DismissAdvertisement();
+
+        Assert.False(viewModel.IsAdvertisementVisible);
+        Assert.Null(viewModel.GetAdvertisementTarget());
+    }
+
+    [Fact]
+    public async Task TrackAdvertisementClickAsync_ReturnsTargetAndTracksDeliberateClick()
+    {
+        var advertisement = new FakeAdvertisementClient
+        {
+            Campaign = new AdCampaign("campaign-1", "t", "b", "go", new Uri("https://example.com/product"), null, null, null)
+        };
+        var viewModel = await CreateCompletedViewModelAsync(new FakeActions(), advertisement);
+        await viewModel.LoadAdvertisementAsync(default);
+
+        var target = await viewModel.TrackAdvertisementClickAsync(default);
+
+        Assert.Equal("https://example.com/product", target?.AbsoluteUri);
+        Assert.Contains(("campaign-1", AdEventType.Click), advertisement.Events);
     }
 
     [Fact]
@@ -356,9 +418,11 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.NeedsLegacyCleanupWarning);
     }
 
-    private static async Task<MainWindowViewModel> CreateCompletedViewModelAsync(FakeActions actions)
+    private static async Task<MainWindowViewModel> CreateCompletedViewModelAsync(
+        FakeActions actions,
+        IAdvertisementClient? advertisementClient = null)
     {
-        var viewModel = new MainWindowViewModel(actions);
+        var viewModel = new MainWindowViewModel(actions, advertisementClient: advertisementClient);
         await viewModel.InitializeAsync(default);
         if (viewModel.IsInstallStep)
         {
@@ -367,6 +431,20 @@ public sealed class MainWindowViewModelTests
         }
         await viewModel.ConfigureAsync("sk-valid12345678", default);
         return viewModel;
+    }
+
+    private sealed class FakeAdvertisementClient : IAdvertisementClient
+    {
+        public AdCampaign? Campaign { get; init; }
+        public List<(string CampaignId, AdEventType EventType)> Events { get; } = [];
+
+        public Task<AdCampaign?> GetCurrentAsync(CancellationToken cancellationToken) => Task.FromResult(Campaign);
+
+        public Task TrackAsync(string campaignId, AdEventType eventType, CancellationToken cancellationToken)
+        {
+            Events.Add((campaignId, eventType));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeActions : IWizardActions

@@ -24,6 +24,12 @@ public sealed class MainWindowStartupTests
                 Assert.NotNull(window.FindName("CompleteStepPanel"));
                 Assert.NotNull(window.FindName("LaunchCodexButton"));
                 Assert.NotNull(window.FindName("CloseAssistantButton"));
+                Assert.IsType<Button>(window.FindName("GettingStartedButton"));
+                Assert.IsType<Expander>(window.FindName("AdvancedCleanupExpander"));
+                Assert.IsType<Border>(window.FindName("AdvertisementCard"));
+                Assert.IsType<Image>(window.FindName("AdvertisementImage"));
+                Assert.IsType<Button>(window.FindName("AdvertisementButton"));
+                Assert.IsType<Button>(window.FindName("DismissAdvertisementButton"));
                 var downloadDirectory = Assert.IsType<TextBox>(window.FindName("DownloadDirectoryTextBox"));
                 var downloadDirectoryBinding = BindingOperations.GetBinding(
                     downloadDirectory,

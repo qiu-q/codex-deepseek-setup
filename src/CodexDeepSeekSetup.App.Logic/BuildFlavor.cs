@@ -9,8 +9,15 @@ public enum BuildFlavor
 public sealed record BuildFlavorOptions(
     bool AllowAdjacentPayload,
     bool EnableProxyConfiguration,
-    string? EmbeddedApiKey)
+    string? EmbeddedApiKey,
+    Uri? AdvertisementEndpoint)
 {
     public static BuildFlavorOptions For(BuildFlavor flavor) =>
-        new(flavor == BuildFlavor.Internal, false, null);
+        new(
+            flavor == BuildFlavor.Internal,
+            false,
+            null,
+            flavor == BuildFlavor.Internal
+                ? new Uri("https://www.qiuqiuqiu.top/xxx/codex-ad/")
+                : null);
 }

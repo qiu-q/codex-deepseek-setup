@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodexDeepSeekSetup.Windows\CodexDeepSeekSetup.Windows.csproj" />
+    <ProjectReference Include="..\..\src\CodexDeepSeekSetup.Helper\CodexDeepSeekSetup.Helper.csproj" />
   </ItemGroup>
 
 </Project>
