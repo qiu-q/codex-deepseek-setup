@@ -12,6 +12,7 @@ type dataStore struct {
 	mu      sync.RWMutex
 	dataDir string
 	ad      Advertisement
+	guide   OnboardingGuide
 	stats   StatsDocument
 }
 
@@ -22,6 +23,7 @@ func openStore(dataDir string) (*dataStore, error) {
 	store := &dataStore{
 		dataDir: dataDir,
 		ad:      Advertisement{Version: 1, Enabled: false},
+		guide:   OnboardingGuide{Version: 1, Enabled: false, Steps: []GuideStep{}},
 		stats:   StatsDocument{Campaigns: map[string]CampaignStats{}},
 	}
 	if err := readJSON(filepath.Join(dataDir, "config.json"), &store.ad); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -30,10 +32,32 @@ func openStore(dataDir string) (*dataStore, error) {
 	if err := readJSON(filepath.Join(dataDir, "stats.json"), &store.stats); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	if err := readJSON(filepath.Join(dataDir, "guide.json"), &store.guide); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	if store.stats.Campaigns == nil {
 		store.stats.Campaigns = map[string]CampaignStats{}
 	}
 	return store, nil
+}
+
+func (store *dataStore) getGuide() OnboardingGuide {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	guide := store.guide
+	guide.Steps = append([]GuideStep(nil), store.guide.Steps...)
+	return guide
+}
+
+func (store *dataStore) setGuide(guide OnboardingGuide) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	guide.Steps = append([]GuideStep(nil), guide.Steps...)
+	if err := writeJSONAtomic(filepath.Join(store.dataDir, "guide.json"), guide); err != nil {
+		return err
+	}
+	store.guide = guide
+	return nil
 }
 
 func (store *dataStore) getAd() Advertisement {

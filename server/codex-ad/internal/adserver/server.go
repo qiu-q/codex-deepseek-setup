@@ -79,16 +79,29 @@ func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /api/v1/ad/current", server.currentAd)
+	mux.HandleFunc("GET /api/v1/guide", server.currentGuide)
 	mux.HandleFunc("POST /api/v1/events", server.recordEvent)
 	mux.HandleFunc("POST /api/admin/login", server.login)
 	mux.HandleFunc("POST /api/admin/logout", server.requireSession(true, server.logout))
 	mux.HandleFunc("GET /api/admin/ad", server.requireSession(false, server.adminAd))
 	mux.HandleFunc("PUT /api/admin/ad", server.requireSession(true, server.adminAd))
+	mux.HandleFunc("GET /api/admin/guide", server.requireSession(false, server.adminGuide))
+	mux.HandleFunc("PUT /api/admin/guide", server.requireSession(true, server.adminGuide))
 	mux.HandleFunc("POST /api/admin/media", server.requireSession(true, server.uploadMedia))
 	mux.HandleFunc("GET /api/admin/stats", server.requireSession(false, server.adminStats))
 	mux.Handle("GET /media/", http.StripPrefix("/media/", http.FileServer(http.Dir(filepath.Join(server.store.dataDir, "media")))))
 	mux.HandleFunc("GET /admin/", server.adminPage)
 	return securityHeaders(mux)
+}
+
+func (server *Server) currentGuide(response http.ResponseWriter, _ *http.Request) {
+	guide := server.store.getGuide()
+	if !guide.Enabled || guide.validate() != nil {
+		response.WriteHeader(http.StatusNoContent)
+		return
+	}
+	response.Header().Set("Cache-Control", "public, max-age=60")
+	writeJSON(response, http.StatusOK, guide)
 }
 
 func (server *Server) health(response http.ResponseWriter, _ *http.Request) {
@@ -187,6 +200,26 @@ func (server *Server) adminAd(response http.ResponseWriter, request *http.Reques
 
 func (server *Server) adminStats(response http.ResponseWriter, _ *http.Request) {
 	writeJSON(response, http.StatusOK, server.store.getStats())
+}
+
+func (server *Server) adminGuide(response http.ResponseWriter, request *http.Request) {
+	if request.Method == http.MethodGet {
+		writeJSON(response, http.StatusOK, server.store.getGuide())
+		return
+	}
+	var guide OnboardingGuide
+	if !decodeJSON(response, request, &guide) {
+		return
+	}
+	if err := guide.validate(); err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := server.store.setGuide(guide); err != nil {
+		http.Error(response, "unable to save guide", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(response, http.StatusOK, guide)
 }
 
 func (server *Server) uploadMedia(response http.ResponseWriter, request *http.Request) {

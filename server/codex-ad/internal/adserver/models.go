@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Advertisement struct {
@@ -71,4 +72,59 @@ type StatsDocument struct {
 type eventRequest struct {
 	CampaignID string `json:"campaignId"`
 	Event      string `json:"event"`
+}
+
+type OnboardingGuide struct {
+	Version int         `json:"version"`
+	Enabled bool        `json:"enabled"`
+	Title   string      `json:"title"`
+	Steps   []GuideStep `json:"steps"`
+}
+
+type GuideStep struct {
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	CompletionHint string `json:"completionHint"`
+	ActionText     string `json:"actionText"`
+	ActionURL      string `json:"actionUrl"`
+	ImageURL       string `json:"imageUrl,omitempty"`
+}
+
+func (guide OnboardingGuide) validate() error {
+	if guide.Version != 1 {
+		return errors.New("version 必须为 1")
+	}
+	if !requiredWithin(guide.Title, 80) {
+		return errors.New("引导标题不能为空且不能超过 80 个字符")
+	}
+	if len(guide.Steps) < 1 || len(guide.Steps) > 8 {
+		return errors.New("引导步骤必须为 1 到 8 个")
+	}
+	identifiers := make(map[string]struct{}, len(guide.Steps))
+	for _, step := range guide.Steps {
+		id := strings.TrimSpace(step.ID)
+		if !requiredWithin(id, 48) {
+			return errors.New("步骤编号不能为空且不能超过 48 个字符")
+		}
+		if _, exists := identifiers[id]; exists {
+			return errors.New("步骤编号不能重复")
+		}
+		identifiers[id] = struct{}{}
+		if !requiredWithin(step.Title, 60) || !requiredWithin(step.Body, 240) ||
+			!requiredWithin(step.CompletionHint, 120) || !requiredWithin(step.ActionText, 16) {
+			return errors.New("步骤文字为空或超过长度限制")
+		}
+		if !isHTTPS(step.ActionURL) {
+			return errors.New("步骤操作地址必须是 HTTPS")
+		}
+		if step.ImageURL != "" && !isHTTPS(step.ImageURL) {
+			return errors.New("步骤图片地址必须是 HTTPS")
+		}
+	}
+	return nil
+}
+
+func requiredWithin(value string, maximum int) bool {
+	return strings.TrimSpace(value) != "" && utf8.RuneCountInString(value) <= maximum
 }

@@ -30,6 +30,77 @@ func TestHealthAndDisabledCampaign(t *testing.T) {
 	}
 }
 
+func TestGuideIsDisabledByDefault(t *testing.T) {
+	server := newTestServer(t)
+
+	response := perform(t, server.Handler(), http.MethodGet, "/api/v1/guide", nil, nil)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("guide status = %d, want 204", response.Code)
+	}
+}
+
+func TestGuideAdminUpdatePreservesStepOrderAndRequiresCsrf(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+	cookie, csrf := login(t, handler)
+	payload := validGuideJSON()
+
+	withoutCSRF := perform(t, handler, http.MethodPut, "/api/admin/guide", strings.NewReader(payload), []*http.Cookie{cookie})
+	if withoutCSRF.Code != http.StatusForbidden {
+		t.Fatalf("guide update without csrf = %d", withoutCSRF.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/guide", strings.NewReader(payload))
+	request.AddCookie(cookie)
+	request.Header.Set("X-CSRF-Token", csrf)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("guide update = %d %s", response.Code, response.Body.String())
+	}
+
+	current := perform(t, handler, http.MethodGet, "/api/v1/guide", nil, nil)
+	if current.Code != http.StatusOK {
+		t.Fatalf("public guide = %d %s", current.Code, current.Body.String())
+	}
+	var guide OnboardingGuide
+	decode(t, current.Body, &guide)
+	if len(guide.Steps) != 2 || guide.Steps[0].ID != "sign-in" || guide.Steps[1].ID != "api-key" {
+		t.Fatalf("guide order = %#v", guide.Steps)
+	}
+}
+
+func TestGuideInvalidUpdateDoesNotReplaceStoredDocument(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+	cookie, csrf := login(t, handler)
+	putGuide(t, handler, cookie, csrf, validGuideJSON(), http.StatusOK)
+
+	invalidDocuments := []string{
+		`{"version":1,"enabled":true,"title":"Bad","steps":[]}`,
+		`{"version":1,"enabled":true,"title":"Bad","steps":[{"id":"same","title":"One","body":"Body","completionHint":"Done","actionText":"Open","actionUrl":"https://example.com/1"},{"id":"same","title":"Two","body":"Body","completionHint":"Done","actionText":"Open","actionUrl":"https://example.com/2"}]}`,
+		`{"version":1,"enabled":true,"title":"Bad","steps":[{"id":"one","title":"One","body":"Body","completionHint":"Done","actionText":"Open","actionUrl":"http://example.com"}]}`,
+	}
+	for _, payload := range invalidDocuments {
+		putGuide(t, handler, cookie, csrf, payload, http.StatusBadRequest)
+	}
+	nineSteps := make([]GuideStep, 9)
+	for index := range nineSteps {
+		nineSteps[index] = validGuideStep("step-" + string(rune('a'+index)))
+	}
+	encoded, err := json.Marshal(OnboardingGuide{Version: 1, Enabled: true, Title: "Too many", Steps: nineSteps})
+	if err != nil {
+		t.Fatal(err)
+	}
+	putGuide(t, handler, cookie, csrf, string(encoded), http.StatusBadRequest)
+
+	current := perform(t, handler, http.MethodGet, "/api/v1/guide", nil, nil)
+	if current.Code != http.StatusOK || !strings.Contains(current.Body.String(), `"title":"DeepSeek API 使用准备"`) {
+		t.Fatalf("stored guide was replaced: %d %s", current.Code, current.Body.String())
+	}
+}
+
 func TestLoginAndCsrfProtectAdminUpdates(t *testing.T) {
 	server := newTestServer(t)
 	handler := server.Handler()
@@ -161,7 +232,10 @@ func TestMediaUploadRejectsFilesLargerThanTwoMegabytes(t *testing.T) {
 func TestAdminPageIsEmbedded(t *testing.T) {
 	server := newTestServer(t)
 	response := perform(t, server.Handler(), http.MethodGet, "/admin/", nil, nil)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Codex 推广管理") {
+	page := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(page, "Codex 内容管理") ||
+		!strings.Contains(page, `id="adEditor"`) || !strings.Contains(page, `id="guideEditor"`) ||
+		!strings.Contains(page, `id="guideSteps"`) {
 		t.Fatalf("admin page = %d %s", response.Code, response.Body.String())
 	}
 }
@@ -231,4 +305,24 @@ func ptrTime(value time.Time) *time.Time { return &value }
 
 func validAdJSON() string {
 	return `{"version":1,"enabled":true,"campaignId":"campaign-1","title":"推广标题","body":"推广说明","ctaText":"了解详情","targetUrl":"https://example.com/product","imageUrl":"","startsAt":null,"endsAt":null}`
+}
+
+func validGuideJSON() string {
+	return `{"version":1,"enabled":true,"title":"DeepSeek API 使用准备","steps":[{"id":"sign-in","title":"登录或注册","body":"登录开放平台。","completionHint":"已进入控制台","actionText":"打开登录页","actionUrl":"https://platform.deepseek.com/sign_in","imageUrl":"https://www.qiuqiuqiu.top/xxx/codex-ad/media/login.webp"},{"id":"api-key","title":"创建 API Key","body":"创建后立即复制。","completionHint":"已复制 Key","actionText":"打开 API Keys","actionUrl":"https://platform.deepseek.com/api_keys","imageUrl":""}]}`
+}
+
+func validGuideStep(id string) GuideStep {
+	return GuideStep{ID: id, Title: "Title", Body: "Body", CompletionHint: "Done", ActionText: "Open", ActionURL: "https://example.com/" + id}
+}
+
+func putGuide(t *testing.T, handler http.Handler, cookie *http.Cookie, csrf, payload string, expectedStatus int) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPut, "/api/admin/guide", strings.NewReader(payload))
+	request.AddCookie(cookie)
+	request.Header.Set("X-CSRF-Token", csrf)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != expectedStatus {
+		t.Fatalf("guide update status = %d want %d body=%s", response.Code, expectedStatus, response.Body.String())
+	}
 }
