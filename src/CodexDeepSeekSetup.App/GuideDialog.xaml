@@ -21,7 +21,14 @@
                     </Grid>
                     <TextBlock Text="{Binding CurrentStep.Title}" FontSize="22" FontWeight="SemiBold" Margin="0,20,0,0"/>
                     <TextBlock Text="{Binding CurrentStep.Body}" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}" FontSize="14" LineHeight="23" Margin="0,9,0,0"/>
-                    <Border Style="{StaticResource InfoAlert}" Margin="0,16,0,0"><StackPanel Orientation="Horizontal"><TextBlock Text="✓" Foreground="{StaticResource SuccessBrush}" FontWeight="Bold" Margin="0,0,8,0"/><TextBlock Text="完成条件：" Foreground="#337ECC"/><TextBlock Text="{Binding CurrentStep.CompletionHint}" TextWrapping="Wrap" Foreground="#337ECC"/></StackPanel></Border>
+                    <Border Style="{StaticResource InfoAlert}" Margin="0,16,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="✓" Foreground="{StaticResource SuccessBrush}" FontWeight="Bold" Margin="0,0,8,0"/>
+                            <TextBlock Grid.Column="1" Text="完成条件：" Foreground="#337ECC"/>
+                            <TextBlock Grid.Column="2" Text="{Binding CurrentStep.CompletionHint}" TextWrapping="Wrap" Foreground="#337ECC"/>
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </Border>
         </ScrollViewer>
