@@ -75,6 +75,23 @@ public sealed class SubscriptionImporterTests : IDisposable
         Assert.False(File.Exists(destination + ".partial"));
     }
 
+    [Fact]
+    public async Task ImportAsync_RequestsClashCompatibleYaml()
+    {
+        string? userAgent = null;
+        var handler = new SubscriptionHandler(request =>
+        {
+            userAgent = request.Headers.UserAgent.ToString();
+            return Response(request, "proxies: []\n", "text/yaml");
+        });
+
+        var result = await new SubscriptionImporter(new HttpClient(handler))
+            .ImportAsync(new Uri("https://provider.example/sub"), Path.Combine(root, "subscription.yaml"), default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("clash.meta", userAgent);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))

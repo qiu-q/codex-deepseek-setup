@@ -52,6 +52,19 @@
                     <StackPanel>
                         <Grid><StackPanel><TextBlock Text="配置 DeepSeek" FontSize="22" FontWeight="SemiBold"/><TextBlock Text="先按分步引导准备 Key，再粘贴验证。引导可以随时关闭，不会阻止继续。" Foreground="{StaticResource SecondaryTextBrush}" Margin="0,7,170,0" TextWrapping="Wrap"/></StackPanel><Button x:Name="ShowGuideButton" Content="查看操作引导" Click="ShowGuideButton_Click" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0"/></Grid>
                         <Border Style="{StaticResource InfoAlert}" Margin="0,16,0,0"><StackPanel><TextBlock Text="登录 → 实名认证 → 充值 → 创建 Key" FontWeight="SemiBold" Foreground="#337ECC"/><TextBlock Text="所有身份资料和支付操作只在 DeepSeek 官方网页完成，本助手不会读取。" Foreground="#337ECC" Margin="0,4,0,0" TextWrapping="Wrap"/></StackPanel></Border>
+                        <Border x:Name="NetworkHelperCard" Style="{StaticResource InnerBorder}" Margin="0,14,0,0" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock Text="可选 · 网络辅助" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="如果当前网络无法直接连接所需服务，可粘贴你有权使用的 HTTPS 订阅。组件优先从本站镜像下载，不需要访问 GitHub。不会启用 TUN、修改 DNS、路由或防火墙。" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,6,0,10"/>
+                                <PasswordBox x:Name="SubscriptionUrlBox" PasswordChar="●" ToolTip="HTTPS 订阅地址只保存到 Windows 凭据管理器"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button x:Name="EnableNetworkHelperButton" Content="启用网络辅助" Click="EnableNetworkHelperButton_Click" Style="{StaticResource PrimaryButton}"/>
+                                    <Button x:Name="DisableNetworkHelperButton" Content="停用并恢复原网络" Click="DisableNetworkHelperButton_Click"/>
+                                </StackPanel>
+                                <ProgressBar x:Name="NetworkHelperProgressBar" Height="7" Minimum="0" Maximum="100" Margin="0,10,0,0"/>
+                                <TextBlock x:Name="NetworkHelperStatusText" Text="尚未启用。订阅地址和节点内容不会写入日志。" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                            </StackPanel>
+                        </Border>
                         <TextBlock Text="DeepSeek API Key" FontWeight="SemiBold" Margin="0,20,0,7"/><PasswordBox x:Name="ApiKeyBox" PasswordChar="●" ToolTip="粘贴 sk- 开头的 DeepSeek API Key"/>
                         <StackPanel Orientation="Horizontal" Margin="0,14,0,0"><Button Content="验证并配置 Codex" Click="ConfigureButton_Click" IsEnabled="{Binding CanConfigure}" Style="{StaticResource SuccessButton}"/><Button Content="返回安装步骤" Click="ReturnToInstallButton_Click" IsEnabled="{Binding CanConfigure}"/></StackPanel>
                         <Border Style="{StaticResource InfoAlert}" Margin="0,14,0,0"><TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#337ECC"/></Border>

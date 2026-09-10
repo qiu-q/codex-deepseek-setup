@@ -11,6 +11,7 @@ $license = Join-Path $payloadSource "ChatGPT-License.xml"
 
 $output = Join-Path $repoRoot "artifacts\internal\win-x64"
 $helperTemp = Join-Path $repoRoot "artifacts\.helper-internal"
+$networkHelperTemp = Join-Path $repoRoot "artifacts\.network-helper-internal"
 $obfuscationOutput = Join-Path $repoRoot "artifacts\.obfuscation-internal"
 $assemblyBackup = Join-Path $repoRoot "artifacts\.assembly-backup-internal"
 $archive = Join-Path $repoRoot "artifacts\CodexDeepSeekSetup-internal-win-x64.zip"
@@ -18,6 +19,7 @@ $appProject = Join-Path $repoRoot "src\CodexDeepSeekSetup.App\CodexDeepSeekSetup
 $appBuildDirectory = Join-Path $repoRoot "src\CodexDeepSeekSetup.App\bin\$Configuration\net8.0-windows10.0.19041.0\win-x64"
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 if (Test-Path -LiteralPath $helperTemp) { Remove-Item -LiteralPath $helperTemp -Recurse -Force }
+if (Test-Path -LiteralPath $networkHelperTemp) { Remove-Item -LiteralPath $networkHelperTemp -Recurse -Force }
 if (Test-Path -LiteralPath $obfuscationOutput) { Remove-Item -LiteralPath $obfuscationOutput -Recurse -Force }
 if (Test-Path -LiteralPath $assemblyBackup) { Remove-Item -LiteralPath $assemblyBackup -Recurse -Force }
 New-Item -Path $output -ItemType Directory -Force | Out-Null
@@ -29,6 +31,12 @@ dotnet publish (Join-Path $repoRoot "src\CodexDeepSeekSetup.Helper\CodexDeepSeek
     -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
     -p:DebugType=None -p:DebugSymbols=false
 if ($LASTEXITCODE -ne 0) { throw "Helper 发布失败，退出码：$LASTEXITCODE" }
+
+dotnet publish (Join-Path $repoRoot "src\CodexDeepSeekSetup.NetworkHelper\CodexDeepSeekSetup.NetworkHelper.csproj") `
+    -c $Configuration -r win-x64 --self-contained true -o $networkHelperTemp `
+    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+    -p:DebugType=None -p:DebugSymbols=false
+if ($LASTEXITCODE -ne 0) { throw "Network Helper 发布失败，退出码：$LASTEXITCODE" }
 
 dotnet tool restore
 if ($LASTEXITCODE -ne 0) { throw "Obfuscar 工具还原失败，退出码：$LASTEXITCODE" }
@@ -80,6 +88,7 @@ finally {
 }
 
 Copy-Item -LiteralPath (Join-Path $helperTemp "CodexDeepSeekSetup.Helper.exe") -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $networkHelperTemp "CodexDeepSeekSetup.NetworkHelper.exe") -Destination $output -Force
 if ((Test-Path -LiteralPath $msix) -and (Test-Path -LiteralPath $license)) {
     $payloadDestination = Join-Path $output "payload"
     New-Item -Path $payloadDestination -ItemType Directory -Force | Out-Null
@@ -91,6 +100,7 @@ else {
     Write-Host "未发现完整 payload，内部版运行时将从 OpenAI 官方地址下载。" -ForegroundColor Yellow
 }
 Remove-Item -LiteralPath $helperTemp -Recurse -Force
+Remove-Item -LiteralPath $networkHelperTemp -Recurse -Force
 Remove-Item -LiteralPath $obfuscarConfig -Force
 Complete-ReleasePackage `
     -OutputDirectory $output `
@@ -99,4 +109,4 @@ Complete-ReleasePackage `
 
 Write-Host "内部开发版（未签名）输出：$output" -ForegroundColor Green
 Write-Host "内部压缩包：$archive" -ForegroundColor Green
-Write-Host "对外分发前必须使用受信任的 Authenticode 代码签名证书签署两个 EXE。" -ForegroundColor Yellow
+Write-Host "对外分发前必须使用受信任的 Authenticode 代码签名证书签署三个 EXE。" -ForegroundColor Yellow

@@ -68,7 +68,9 @@ public sealed class WindowsUserProxyManager(
 
         try
         {
-            var snapshot = JsonSerializer.Deserialize<UserProxySnapshot>(File.ReadAllText(recoveryMarkerPath));
+            var snapshot = JsonSerializer.Deserialize(
+                File.ReadAllText(recoveryMarkerPath),
+                ProxyJsonContext.Default.UserProxySnapshot);
             if (snapshot is null)
             {
                 return Task.FromResult(OperationResult<Unit>.Failure("proxy.settings.recovery", "系统代理恢复记录无效"));
@@ -96,7 +98,7 @@ public sealed class WindowsUserProxyManager(
         var fullPath = Path.GetFullPath(recoveryMarkerPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         var partial = fullPath + ".partial";
-        File.WriteAllText(partial, JsonSerializer.Serialize(snapshot));
+        File.WriteAllText(partial, JsonSerializer.Serialize(snapshot, ProxyJsonContext.Default.UserProxySnapshot));
         File.Move(partial, fullPath, overwrite: true);
     }
 }

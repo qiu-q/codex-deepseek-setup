@@ -16,7 +16,7 @@ public sealed record BuildFlavorOptions(
     public static BuildFlavorOptions For(BuildFlavor flavor) =>
         new(
             flavor == BuildFlavor.Internal,
-            false,
+            true,
             null,
             flavor == BuildFlavor.Internal
                 ? new Uri("https://www.qiuqiuqiu.top/xxx/codex-ad/")

@@ -74,7 +74,9 @@ public sealed class ProxyProcessSupervisor(IProxyProcessPlatform platform, strin
             var fullStatePath = Path.GetFullPath(statePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullStatePath)!);
             var partial = fullStatePath + ".partial";
-            File.WriteAllText(partial, JsonSerializer.Serialize(new ProxyProcessState(processId, fullExecutable, port)));
+            File.WriteAllText(partial, JsonSerializer.Serialize(
+                new ProxyProcessState(processId, fullExecutable, port),
+                ProxyJsonContext.Default.ProxyProcessState));
             File.Move(partial, fullStatePath, overwrite: true);
             return OperationResult<int>.Success(processId);
         }
@@ -96,7 +98,9 @@ public sealed class ProxyProcessSupervisor(IProxyProcessPlatform platform, strin
         ProxyProcessState? state;
         try
         {
-            state = JsonSerializer.Deserialize<ProxyProcessState>(File.ReadAllText(statePath));
+            state = JsonSerializer.Deserialize(
+                File.ReadAllText(statePath),
+                ProxyJsonContext.Default.ProxyProcessState);
         }
         catch (Exception error) when (error is IOException or JsonException)
         {
@@ -137,7 +141,6 @@ public sealed class ProxyProcessSupervisor(IProxyProcessPlatform platform, strin
         }
     }
 
-    private sealed record ProxyProcessState(int ProcessId, string ExecutablePath, int Port);
 }
 
 public sealed class SystemProxyProcessPlatform : IProxyProcessPlatform

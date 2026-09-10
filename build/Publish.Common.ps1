@@ -15,6 +15,13 @@ function Complete-ReleasePackage {
     if ($helperBytes -gt 25MB) {
         throw "辅助程序超过 25 MB：$([math]::Round($helperBytes / 1MB, 2)) MB"
     }
+    $networkHelperExe = Join-Path $OutputDirectory "CodexDeepSeekSetup.NetworkHelper.exe"
+    if (Test-Path -LiteralPath $networkHelperExe) {
+        $networkHelperBytes = (Get-Item -LiteralPath $networkHelperExe).Length
+        if ($networkHelperBytes -gt 25MB) {
+            throw "网络辅助程序超过 25 MB：$([math]::Round($networkHelperBytes / 1MB, 2)) MB"
+        }
+    }
 
     # Windows PowerShell 5.1 does not provide Path.GetRelativePath. The publish
     # directory is an already-resolved parent of every entry, so a guarded
@@ -52,6 +59,9 @@ function Complete-ReleasePackage {
 
     Write-Host "主程序：$([math]::Round((Get-Item $mainExe).Length / 1MB, 2)) MB" -ForegroundColor Cyan
     Write-Host "辅助程序：$([math]::Round($helperBytes / 1MB, 2)) MB" -ForegroundColor Cyan
+    if (Test-Path -LiteralPath $networkHelperExe) {
+        Write-Host "网络辅助：$([math]::Round((Get-Item $networkHelperExe).Length / 1MB, 2)) MB" -ForegroundColor Cyan
+    }
     Write-Host "ZIP：$([math]::Round($archive.Length / 1MB, 2)) MB" -ForegroundColor Cyan
     Write-Host "SHA-256：$hash" -ForegroundColor Cyan
 }

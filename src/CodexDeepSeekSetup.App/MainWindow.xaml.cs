@@ -8,6 +8,7 @@ using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Advertisements;
 using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
+using CodexDeepSeekSetup.Windows.Proxy;
 
 namespace CodexDeepSeekSetup.App;
 
@@ -31,6 +32,7 @@ public partial class MainWindow : Window
 #endif
         var options = BuildFlavorOptions.For(flavor);
         actions = DesktopSetupActions.Create(options);
+        NetworkHelperCard.Visibility = options.EnableProxyConfiguration ? Visibility.Visible : Visibility.Collapsed;
         IAdvertisementClient? advertisementClient = null;
         IGuideClient? guideClient = null;
         if (options.AdvertisementEndpoint is not null || options.GuideEndpoint is not null)
@@ -124,6 +126,48 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, result.ErrorMessage, "DeepSeek 配置未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private async void EnableNetworkHelperButton_Click(object sender, RoutedEventArgs e)
+    {
+        var subscription = SubscriptionUrlBox.Password;
+        SetNetworkButtons(false);
+        NetworkHelperProgressBar.Value = 0;
+        var progress = new Progress<ProxyLifecycleProgress>(update =>
+        {
+            NetworkHelperProgressBar.Value = update.Percent;
+            NetworkHelperStatusText.Text = update.Message;
+        });
+        var result = await RunUiAsync(() => actions.EnableNetworkHelperAsync(subscription, progress, lifetime.Token));
+        SetNetworkButtons(true);
+        if (result?.IsSuccess == true)
+        {
+            SubscriptionUrlBox.Clear();
+            NetworkHelperProgressBar.Value = 100;
+            NetworkHelperStatusText.Text = "网络辅助已启用，并会在当前用户登录 Windows 后自动恢复运行。下一步请创建并填写 DeepSeek API Key。";
+        }
+        else if (result is { ErrorMessage: not null })
+        {
+            NetworkHelperStatusText.Text = result.ErrorMessage;
+            MessageBox.Show(this, result.ErrorMessage, "网络辅助未启用", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void DisableNetworkHelperButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetNetworkButtons(false);
+        var result = await RunUiAsync(() => actions.DisableNetworkHelperAsync(lifetime.Token));
+        SetNetworkButtons(true);
+        NetworkHelperProgressBar.Value = 0;
+        NetworkHelperStatusText.Text = result?.IsSuccess == true
+            ? "已停止网络辅助，并恢复启用前的 Windows 当前用户代理设置。"
+            : result?.ErrorMessage ?? "停用未完成，请重试。";
+    }
+
+    private void SetNetworkButtons(bool enabled)
+    {
+        EnableNetworkHelperButton.IsEnabled = enabled;
+        DisableNetworkHelperButton.IsEnabled = enabled;
     }
 
     private async void EnableAdministratorCompatibilityButton_Click(object sender, RoutedEventArgs e)

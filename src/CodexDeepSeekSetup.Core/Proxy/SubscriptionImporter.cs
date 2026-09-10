@@ -22,8 +22,10 @@ public sealed class SubscriptionImporter(HttpClient http)
         var partialPath = destination + ".partial";
         try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Get, subscriptionUri);
+            request.Headers.UserAgent.ParseAdd("clash.meta");
             using var response = await http.SendAsync(
-                    new HttpRequestMessage(HttpMethod.Get, subscriptionUri),
+                    request,
                     HttpCompletionOption.ResponseHeadersRead,
                     cancellationToken)
                 .ConfigureAwait(false);

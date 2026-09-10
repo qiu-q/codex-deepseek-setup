@@ -13,6 +13,7 @@ using CodexDeepSeekSetup.Windows.Cleanup;
 using CodexDeepSeekSetup.Windows.Diagnostics;
 using CodexDeepSeekSetup.Windows.Packages;
 using CodexDeepSeekSetup.Windows.Processes;
+using CodexDeepSeekSetup.Windows.Proxy;
 using CodexDeepSeekSetup.Windows.Security;
 using CodexDeepSeekSetup.Windows.Storage;
 
@@ -40,6 +41,8 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
     private readonly string helperPath;
     private readonly string previousCodexCliPath;
     private readonly string elevatedExecutablePath;
+    private readonly ProxyLifecycleService? proxyLifecycle;
+    private readonly string networkHelperSourcePath;
     private CodexPayload? payload;
     private PortableCodexInstall? portableInstall;
     private AssistantInstallState? installState;
@@ -65,6 +68,8 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
 
     public bool HasInstallLedger => installState is not null;
 
+    public bool IsNetworkHelperAvailable => flavor.EnableProxyConfiguration;
+
     private DesktopSetupActions(
         BuildFlavorOptions flavor,
         OfficialDownloadService downloader,
@@ -85,7 +90,9 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         string helperSourcePath,
         string helperPath,
         string previousCodexCliPath,
-        string elevatedExecutablePath)
+        string elevatedExecutablePath,
+        ProxyLifecycleService? proxyLifecycle,
+        string networkHelperSourcePath)
     {
         this.flavor = flavor;
         this.downloader = downloader;
@@ -106,6 +113,8 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         this.helperPath = helperPath;
         this.previousCodexCliPath = previousCodexCliPath;
         this.elevatedExecutablePath = elevatedExecutablePath;
+        this.proxyLifecycle = proxyLifecycle;
+        this.networkHelperSourcePath = networkHelperSourcePath;
         var driveOptions = storageSelectionService.GetInstallDrives();
         InstallDriveChoices = driveOptions
             .Select(option => new InstallDriveChoice(option.RootPath, option.DisplayName, option.IsDefault))
@@ -159,13 +168,30 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
             helperSource,
             helper,
             Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User) ?? string.Empty,
-            elevatedExecutable);
+            elevatedExecutable,
+            flavor.EnableProxyConfiguration
+                ? ProxyLifecycleService.CreateDefault(new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
+                : null,
+            Path.Combine(AppContext.BaseDirectory, "CodexDeepSeekSetup.NetworkHelper.exe"));
         var portableRoot = GetPortableRoot();
         var persistedCli = Environment.GetEnvironmentVariable("CODEX_CLI_PATH", EnvironmentVariableTarget.User);
         actions.portableInstall = PortableCodexInstaller.TryRecover(portableRoot, persistedCli);
         actions.IsCodexInstalled = actions.portableInstall is not null;
         return actions;
     }
+
+    public Task<OperationResult<Unit>> EnableNetworkHelperAsync(
+        string subscriptionUrl,
+        IProgress<ProxyLifecycleProgress>? progress,
+        CancellationToken cancellationToken) =>
+        proxyLifecycle is null
+            ? Task.FromResult(Failure("proxy.disabled", "开源版不包含网络辅助功能"))
+            : proxyLifecycle.EnableAsync(subscriptionUrl, networkHelperSourcePath, progress, cancellationToken);
+
+    public Task<OperationResult<Unit>> DisableNetworkHelperAsync(CancellationToken cancellationToken) =>
+        proxyLifecycle is null
+            ? Task.FromResult(OperationResult<Unit>.Success(default))
+            : proxyLifecycle.DisableAsync(true, true, true, cancellationToken);
 
     public async Task<OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>> ScanAsync(
         CancellationToken cancellationToken)
@@ -208,6 +234,22 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
             codexHome,
             cancellationToken).ConfigureAwait(false);
         var items = artifacts.Select(MapArtifact).ToList();
+        if (proxyLifecycle is not null)
+        {
+            var proxyPaths = ProxyPaths.ForCurrentUser();
+            var proxyCredential = secretStore.Exists(CredentialTargets.ProxySubscription);
+            if (Directory.Exists(proxyPaths.Root) || proxyCredential is { IsSuccess: true, Value: true })
+            {
+                items.Add(new MaintenanceArtifactInfo(
+                    CodexArtifactIds.NetworkHelper,
+                    "Mihomo 网络辅助、订阅凭据与代理恢复记录",
+                    proxyPaths.Root,
+                    TryGetDirectorySize(proxyPaths.Root),
+                    true,
+                    false,
+                    false));
+            }
+        }
         var bundledPayloadDirectory = Path.Combine(AppContext.BaseDirectory, "payload");
         var bundledPayloadFiles = SelfDeleteFinalizer.BundledPayloadFileNames
             .Select(name => Path.Combine(bundledPayloadDirectory, name))
@@ -296,6 +338,12 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         try
         {
             var failures = new List<string>();
+            if (proxyLifecycle is not null && selected.Overlaps(
+                [CodexArtifactIds.NetworkHelper, CodexArtifactIds.AssistantData, CodexArtifactIds.AssistantInstall, CodexArtifactIds.AssistantSelf]))
+            {
+                var proxyCleanup = await proxyLifecycle.DisableAsync(true, true, true, cancellationToken).ConfigureAwait(false);
+                if (!proxyCleanup.IsSuccess) failures.Add(proxyCleanup.ErrorMessage ?? "网络辅助未能完全清理");
+            }
             if (selected.Overlaps(
                 [
                     CodexArtifactIds.Package,
@@ -414,6 +462,20 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         catch
         {
             return 0;
+        }
+    }
+
+    private static long? TryGetDirectorySize(string path)
+    {
+        try
+        {
+            return Directory.Exists(path)
+                ? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(TryGetFileSize)
+                : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -941,6 +1003,11 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         var finalizerStarted = false;
         try
         {
+            if (proxyLifecycle is not null)
+            {
+                var proxyCleanup = await proxyLifecycle.DisableAsync(true, true, true, cancellationToken).ConfigureAwait(false);
+                if (!proxyCleanup.IsSuccess) return proxyCleanup;
+            }
             var removed = await packageManager.RemoveAsync(cancellationToken).ConfigureAwait(false);
             if (!removed.IsSuccess)
             {

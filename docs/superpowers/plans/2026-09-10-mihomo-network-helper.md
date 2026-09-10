@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a reversible internal-build Mihomo network helper, mirror its pinned official artifacts on the user's server, and publish the current open-source installer on GitHub.
+**Goal:** Add a reversible optional Mihomo network helper, mirror its pinned official artifacts on the user's server, and publish the installer on GitHub.
 
-**Architecture:** Core services download and validate a pinned Mihomo archive and subscription, Windows services snapshot/restore per-user proxy settings, and a small helper owns Mihomo's lifetime. WPF exposes an optional internal-only step, while cleanup removes every owned artifact in dependency order.
+**Architecture:** Core services download and validate a pinned Mihomo archive and subscription, Windows services snapshot/restore per-user proxy settings, and a small helper owns Mihomo's lifetime. WPF exposes an optional step in both builds, while cleanup removes every owned artifact in dependency order. Only the internal build connects to advertising and guide administration.
 
 **Tech Stack:** C# 12, .NET 8 WPF, Windows Registry and Credential Manager APIs, xUnit, PowerShell, Nginx, GitHub CLI, Mihomo v1.19.30.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Internal build only; open-source build contains no active proxy feature.
+- Both builds may use the optional proxy; neither embeds a subscription or node.
 - Accept only user-supplied HTTPS subscription URLs and never log or serialize the URL.
 - Pin Mihomo v1.19.30 archive SHA-256 `289fde5e29d37a5b3326480590d8b3551c5bf7f8737290355c19bce74d57a563`.
 - No TUN, driver, DNS, route, firewall, WinHTTP, or machine-wide proxy changes.
@@ -33,7 +33,7 @@
 - Produces: public repository `qiu-q/codex-deepseek-setup` with default branch `main` and release `v1.1.0`.
 
 - [ ] Scan tracked content and patch history for `sk-`, `agt_codex_`, `OwO=`, server passwords, private keys, payloads, and subscription URLs; abort publication on any secret match.
-- [ ] Run the full .NET tests and both release builds; confirm the open-source ZIP contains only the two EXEs and report files and contains no proxy or advertisement endpoint activation.
+- [ ] Run the full .NET tests and both release builds; confirm the open-source ZIP contains the three expected EXEs and report files and contains no advertisement endpoint activation.
 - [ ] Create the public repository with `gh repo create qiu-q/codex-deepseek-setup --public --description "Windows installer assistant for OpenAI Codex and DeepSeek"`, add it as `origin-public`, and push the reviewed current commit as `HEAD:main` without altering the existing local branch or remote.
 - [ ] Create GitHub release `v1.1.0` with both ZIP and SHA-256 assets and an unsigned-development-build warning.
 - [ ] Verify the repository and release are publicly readable with unauthenticated HTTPS requests.
@@ -94,7 +94,7 @@
 - [ ] Run focused and full Windows tests with zero failures.
 - [ ] Commit as `feat: manage reversible windows user proxy`.
 
-### Task 5: Add the trimmed network helper and internal UI flow
+### Task 5: Add the trimmed network helper and optional UI flow
 
 **Files:**
 - Create: `src/CodexDeepSeekSetup.NetworkHelper/CodexDeepSeekSetup.NetworkHelper.csproj`
@@ -111,14 +111,14 @@
 
 **Interfaces:**
 - Consumes: proxy provisioning and Windows ownership APIs from Tasks 3–4.
-- Produces: internal-only consent, subscription, download/test/start/stop state and `CodexNetworkHelper.exe`.
+- Produces: optional subscription, download/start/stop state and `CodexDeepSeekSetup.NetworkHelper.exe`.
 
-- [ ] Write failing view-model and real-WPF structure tests for internal-only visibility, explicit consent, masked subscription field, button gating, progress, classified errors, and stop/restore.
+- [ ] Write failing view-model and real-WPF structure tests for optional visibility, masked subscription field, button gating, progress, classified errors, and stop/restore.
 - [ ] Add helper command validation tests proving only `start`, `stop`, and `repair` with owned local state files are accepted.
 - [ ] Implement build-flavor options, WPF card, action wiring, credential storage, startup repair, and helper lifecycle.
 - [ ] Publish the helper trimmed, self-contained, single-file, compressed, and below 15 MB.
 - [ ] Run all .NET tests and Windows cross-builds with zero failures.
-- [ ] Commit as `feat: add optional internal network step`.
+- [ ] Commit as `feat: add optional network step`.
 
 ### Task 6: Extend inventory, cleanup, release, and documentation
 
@@ -140,7 +140,7 @@
 
 - [ ] Write failing cleanup tests proving restore and process stop occur before credential/runtime deletion and unknown neighboring files survive.
 - [ ] Implement inventory entries, danger flags, ordered removal, active-state UI, and self-delete protection.
-- [ ] Update publish scripts so only the internal build contains `CodexNetworkHelper.exe`; fail if the open-source archive contains proxy runtime endpoints or the network helper.
+- [ ] Update publish scripts so both builds contain the trimmed network helper; fail if either archive exceeds its size budget.
 - [ ] Document consent, privacy, GPL/source mirror, recovery, manual stop, and Windows test cases.
 - [ ] Run full .NET/Go/PowerShell verification, publish both ZIPs, record sizes and SHA-256, and perform Windows 10/11 smoke tests before calling the proxy build release-ready.
 - [ ] Commit as `feat: complete optional mihomo network integration`.

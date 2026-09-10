@@ -3,6 +3,7 @@ namespace CodexDeepSeekSetup.Windows.Processes;
 public static class CredentialTargets
 {
     public const string DeepSeekApiKey = "CodexDeepSeekSetup/DeepSeekApiKey";
+    public const string ProxySubscription = "CodexDeepSeekSetup/ProxySubscription";
 }
 
 public interface IRestrictedOperations

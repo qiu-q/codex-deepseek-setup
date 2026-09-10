@@ -2,11 +2,11 @@
 
 ## Goal
 
-Add an optional, reversible network connection step to the internal Windows installer so a user can import their own HTTPS subscription and launch Codex through a local Mihomo proxy without needing direct GitHub access. Publish the existing open-source installer source and release on GitHub without advertisements, subscriptions, nodes, credentials, or server secrets.
+Add an optional, reversible network connection step to the Windows installer so a user can import their own HTTPS subscription and launch Codex through a local Mihomo proxy without needing direct GitHub access. Publish the installer source and release on GitHub without advertisements, embedded subscriptions, nodes, credentials, or server secrets.
 
 ## Product boundary
 
-- The feature is enabled only in the internal build. The open-source build remains free of proxy download and activation UI.
+- The feature is available in both builds; the open-source build remains free of advertisements and telemetry.
 - No subscription URL, node, route, VPN driver, DNS override, or proxy server credential is embedded in either build.
 - The user must explicitly enable the feature and paste a subscription URL they are authorized to use.
 - The assistant does not bypass OpenAI, Google, DeepSeek, or Microsoft authentication and does not claim to bypass regional or legal restrictions.
@@ -25,7 +25,7 @@ The server directory also exposes `mihomo-v1.19.30-source.tar.gz`, `LICENSE-GPL-
 
 ## User flow
 
-The internal build adds a collapsible “网络连接（可选）” card between Codex installation and DeepSeek configuration:
+The installer adds a “网络连接（可选）” card between Codex installation and DeepSeek configuration:
 
 1. The user selects “启用网络连接” and pastes an HTTPS subscription URL.
 2. “下载并测试” downloads Mihomo from the primary mirror, falls back to the official URL, verifies the pinned hash, safely extracts only the expected executable, and downloads the subscription.
@@ -53,7 +53,7 @@ The subscription URL is stored in Windows Credential Manager under `CodexDeepSee
 
 ### Network helper
 
-`CodexNetworkHelper.exe` is a trimmed, self-contained console/hidden-window process. It accepts only fixed verbs (`start`, `stop`, `repair`) plus validated local paths supplied through a short-lived state file. It keeps running while the proxy is active, handles process exit and Windows session shutdown, restores the saved proxy, and deletes its transient state. It does not receive the subscription URL.
+`CodexDeepSeekSetup.NetworkHelper.exe` is a trimmed, self-contained console/hidden-window process. It accepts only fixed verbs (`start`, `stop`, `repair`, `remove`). The subscription URL is read directly from Windows Credential Manager and never appears in its command line. A per-user Run entry restarts the owned Mihomo process after login; each restart restores any stale snapshot before applying the new local proxy.
 
 ### WPF integration
 
@@ -65,7 +65,7 @@ Maintenance inventory lists the Mihomo archive, runtime directory, provider cach
 
 ## Open-source publication
 
-Create public repository `qiu-q/codex-deepseek-setup` using the existing MIT license. Before the first push, scan tracked files and Git history for API keys, subscription URLs, passwords, payloads, downloaded MSIX files, and generated artifacts. Publish source on the `main` branch and create release `v1.1.0` with the current open-source Windows ZIP and its SHA-256 file. The release description states that binaries are unsigned development builds and that the open-source build has no proxy, advertisement, or telemetry.
+Create public repository `qiu-q/codex-deepseek-setup` using the existing MIT license. Before each push, scan tracked files and Git history for API keys, subscription URLs, passwords, payloads, downloaded MSIX files, and generated artifacts. Publish source on the `main` branch and create release `v1.2.0` with the open-source Windows ZIP and its SHA-256 file. The release description states that binaries are unsigned development builds, the proxy is optional and user-supplied, and the open-source build has no advertisement or telemetry.
 
 ## Error handling
 
@@ -80,6 +80,6 @@ Create public repository `qiu-q/codex-deepseek-setup` using the existing MIT lic
 ## Verification
 
 - Unit tests cover URL allowlisting, redirect rejection, hash verification, ZIP traversal rejection, subscription size/content validation, deterministic YAML, secret redaction, proxy snapshot/restore, stale recovery, PID/path validation, and cleanup ordering.
-- WPF tests cover internal-only visibility, consent gating, masked input, state transitions, and non-blocking failures.
+- WPF tests cover optional visibility, masked input, state transitions, and non-blocking failures.
 - Windows 10 19045 and Windows 11 smoke tests cover direct mirror download, official fallback, import, startup, system proxy activation, Codex launch, normal stop, crash recovery, reboot recovery, existing PAC restoration, cleanup, and self-delete.
 - Release verification checks ZIP size, hashes, absence of subscription material, absence of Mihomo in the open-source ZIP, and correct GPL/source links on the mirror.

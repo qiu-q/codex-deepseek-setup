@@ -23,8 +23,9 @@
 - 完成页逐项确认 Codex、Windows 凭据和配置文件状态，并提供“启动 Codex”和“查看首次使用教程”。启动成功后会直接显示下一步提示。
 - 随时提供“检测安装与清理数据”窗口，可查看位置和大小，并按项删除安装包、Codex、用户数据、CLI、凭据、缓存或安装助手自身。
 - 主窗口、维护窗口和操作引导统一采用接近 Element Plus 的轻量视觉：白色页面、浅灰边框、4—6 px 小圆角和克制的状态色，不使用大面积深色顶栏。
+- 可选启用轻量 Mihomo 网络辅助：用户自行粘贴有权使用的 HTTPS 订阅，运行时优先从项目自有 HTTPS 镜像下载并校验固定 SHA-256，GitHub 官方 Release 仅作备用；启用、停用和恢复均有可见进度。
 
-它不会安装或配置 FlClash、代理、VPN、DNS、路由或节点订阅，也不包含 API Key。
+它不会内置节点、订阅或共享代理账号，不启用 TUN，不修改 DNS、路由、防火墙、WinHTTP 或整机设置，也不包含 API Key。网络辅助仅在用户主动填写订阅并点击启用后，修改当前 Windows 用户的 Internet 代理；停用与清理会恢复启用前的原值。
 
 ## 使用
 
@@ -33,6 +34,7 @@
 ```text
 CodexDeepSeekSetup.exe
 CodexDeepSeekSetup.Helper.exe
+CodexDeepSeekSetup.NetworkHelper.exe
 ```
 
 双击 `CodexDeepSeekSetup.exe`，程序会自动检查电脑。第一张向导页包含下载和安装两个阶段，依次完成：
@@ -40,7 +42,7 @@ CodexDeepSeekSetup.Helper.exe
 1. 确认“安装包保存到”和“Codex 安装磁盘”。D 盘是已就绪的本地固定 NTFS 磁盘且可用空间不少于 3 GB 时会被优先选择；否则使用系统盘。
 2. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
 3. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
-4. 进入 DeepSeek 页面后按分步弹窗完成登录、实名认证、充值和 Key 创建；弹窗可随时关闭，并可用“查看操作引导”重新打开。粘贴 API Key 后点击“验证并配置 Codex”。
+4. 进入 DeepSeek 页面后按分步弹窗完成登录、实名认证、充值和 Key 创建；弹窗可随时关闭，并可用“查看操作引导”重新打开。如果网络确实需要辅助，可先在可选区域填写自己的 HTTPS 订阅并启用；不需要时直接跳过。粘贴 API Key 后点击“验证并配置 Codex”。
 5. 在完成页核对三项完成结果，点击“启动 Codex”；按钮变为“Codex 已启动”后即可新建任务并选择 DeepSeek 模型。清理功能位于折叠的“高级操作”。
 
 下载区域会持续显示文件级进度与总体进度。展开“查看详细记录”可查看检查、下载、校验、授权、部署、注册、CLI 和保存状态等阶段；记录只包含运行状态，不包含 API Key。
@@ -65,9 +67,9 @@ powershell -ExecutionPolicy Bypass -File .\build\Publish-OpenSource.ps1
 
 输出位于 `artifacts\open-source\win-x64`。
 
-发布脚本同时生成 ZIP、`release-report.json`、ZIP 的 `.sha256.txt` 校验文件，并检查辅助程序不超过 25 MB、无官方 MSIX 时发布 ZIP 不超过 85 MB。WPF 主程序保持不裁剪并启用单文件压缩；辅助程序使用完整裁剪、固定区域设置和单文件压缩，因此 Windows 10/11 无需另装 .NET 运行时。
+发布脚本同时生成 ZIP、`release-report.json`、ZIP 的 `.sha256.txt` 校验文件，并检查两个辅助程序分别不超过 25 MB、无官方 MSIX 时发布 ZIP 不超过 85 MB。WPF 主程序保持不裁剪并启用单文件压缩；辅助程序使用完整裁剪、固定区域设置和单文件压缩，因此 Windows 10/11 无需另装 .NET 运行时。
 
-脚本生成的是未签名开发版。Windows 可能显示“未知发布者”或 SmartScreen 提示；对外分发前必须使用受信任的 Authenticode 证书签署两个 EXE。
+脚本生成的是未签名开发版。Windows 可能显示“未知发布者”或 SmartScreen 提示；对外分发前必须使用受信任的 Authenticode 证书签署三个 EXE。
 
 内部离线版只允许把未修改的 OpenAI 官方文件放在仓库根目录的 `payload` 文件夹，再执行：
 
@@ -90,6 +92,8 @@ powershell -ExecutionPolicy Bypass -File .\build\Publish-Internal.ps1
 - 下载主机被限制为 `persistent.oaistatic.com`，DeepSeek API 固定为 `https://api.deepseek.com/`。
 - 提权助手只接受受限命令；它会在管理员上下文再次验证 MSIX。
 - API Key 不进入 TOML、JSON、命令行参数、日志或构建产物。
+- 代理订阅地址仅保存在当前用户 Windows 凭据管理器，不进入日志、配置或命令行；节点缓存位于当前用户本地数据目录，可由维护页清理。
+- Mihomo 固定为 `v1.19.30`，镜像清单、上游源码归档和 GPLv3 许可证见 `server/mihomo-mirror`；程序仍会对下载归档执行固定 SHA-256 校验。
 - 推广后台密码、服务器登录凭据和第三方密钥均不嵌入客户端；对外分发的内部版也只包含公开 HTTPS 接口地址。
 - 清理目录由程序从 Windows 已知用户目录推导；安全检查会拒绝磁盘根目录、用户目录根、桌面和任意外部路径。
 - 正式路径不解包运行；实验路径只解压通过官方签名和包身份校验的 MSIX，始终不重签名、不重新封包。

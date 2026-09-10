@@ -42,6 +42,10 @@ public sealed class MainWindowStartupTests
                 Assert.IsType<Button>(window.FindName("OpenMaintenanceButton"));
                 Assert.IsType<Button>(window.FindName("EnableAdministratorCompatibilityButton"));
                 Assert.IsType<Button>(window.FindName("ShowGuideButton"));
+                Assert.IsType<Border>(window.FindName("NetworkHelperCard"));
+                Assert.IsType<PasswordBox>(window.FindName("SubscriptionUrlBox"));
+                Assert.IsType<Button>(window.FindName("EnableNetworkHelperButton"));
+                Assert.IsType<Button>(window.FindName("DisableNetworkHelperButton"));
                 var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
                 var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
                 var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));

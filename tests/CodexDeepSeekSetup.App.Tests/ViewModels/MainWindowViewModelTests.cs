@@ -249,16 +249,16 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void Flavor_NeverEnablesProxyOrEmbeddedKey_AndOnlyInternalEnablesRemoteContent()
+    public void Flavor_EnablesOptionalProxyButOnlyInternalEnablesRemoteContent()
     {
         var openSource = BuildFlavorOptions.For(BuildFlavor.OpenSource);
         var internalBuild = BuildFlavorOptions.For(BuildFlavor.Internal);
 
-        Assert.False(openSource.EnableProxyConfiguration);
+        Assert.True(openSource.EnableProxyConfiguration);
+        Assert.True(internalBuild.EnableProxyConfiguration);
         Assert.Null(openSource.EmbeddedApiKey);
         Assert.Null(openSource.AdvertisementEndpoint);
         Assert.Null(openSource.GuideEndpoint);
-        Assert.False(internalBuild.EnableProxyConfiguration);
         Assert.Null(internalBuild.EmbeddedApiKey);
         Assert.Equal(
             "https://www.qiuqiuqiu.top/xxx/codex-ad/",

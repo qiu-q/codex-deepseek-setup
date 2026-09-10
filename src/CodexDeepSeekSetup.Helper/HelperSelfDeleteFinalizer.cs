@@ -10,6 +10,7 @@ public sealed class HelperSelfDeleteFinalizer(
     [
         "CodexDeepSeekSetup.exe",
         "CodexDeepSeekSetup.Helper.exe",
+        "CodexDeepSeekSetup.NetworkHelper.exe",
         "wpfgfx_cor3.dll",
         "PresentationNative_cor3.dll",
         "vcruntime140_cor3.dll",

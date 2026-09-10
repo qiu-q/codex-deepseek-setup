@@ -18,6 +18,7 @@ public static class CodexArtifactIds
     public const string Credential = "credential";
     public const string EnvironmentVariable = "environment-variable";
     public const string AssistantSelf = "assistant-self";
+    public const string NetworkHelper = "network-helper";
 }
 
 public sealed record CodexArtifact(
