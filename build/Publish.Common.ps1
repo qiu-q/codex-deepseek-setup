@@ -16,9 +16,18 @@ function Complete-ReleasePackage {
         throw "辅助程序超过 25 MB：$([math]::Round($helperBytes / 1MB, 2)) MB"
     }
 
+    # Windows PowerShell 5.1 does not provide Path.GetRelativePath. The publish
+    # directory is an already-resolved parent of every entry, so a guarded
+    # substring keeps the release script compatible with the Windows 10 inbox
+    # PowerShell while still emitting portable '/' separators.
+    $outputRoot = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd([char[]]@('\', '/'))
     $entries = Get-ChildItem -LiteralPath $OutputDirectory -File -Recurse | ForEach-Object {
+        $entryPath = [IO.Path]::GetFullPath($_.FullName)
+        if (-not $entryPath.StartsWith($outputRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "发布文件不在输出目录内：$entryPath"
+        }
         [PSCustomObject]@{
-            Path = [IO.Path]::GetRelativePath($OutputDirectory, $_.FullName).Replace('\', '/')
+            Path = $entryPath.Substring($outputRoot.Length).TrimStart([char[]]@('\', '/')).Replace('\', '/')
             SizeBytes = $_.Length
             Sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }

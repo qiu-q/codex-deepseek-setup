@@ -12,14 +12,17 @@ $license = Join-Path $payloadSource "ChatGPT-License.xml"
 $output = Join-Path $repoRoot "artifacts\internal\win-x64"
 $helperTemp = Join-Path $repoRoot "artifacts\.helper-internal"
 $obfuscationOutput = Join-Path $repoRoot "artifacts\.obfuscation-internal"
+$assemblyBackup = Join-Path $repoRoot "artifacts\.assembly-backup-internal"
 $archive = Join-Path $repoRoot "artifacts\CodexDeepSeekSetup-internal-win-x64.zip"
 $appProject = Join-Path $repoRoot "src\CodexDeepSeekSetup.App\CodexDeepSeekSetup.App.csproj"
 $appBuildDirectory = Join-Path $repoRoot "src\CodexDeepSeekSetup.App\bin\$Configuration\net8.0-windows10.0.19041.0\win-x64"
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 if (Test-Path -LiteralPath $helperTemp) { Remove-Item -LiteralPath $helperTemp -Recurse -Force }
 if (Test-Path -LiteralPath $obfuscationOutput) { Remove-Item -LiteralPath $obfuscationOutput -Recurse -Force }
+if (Test-Path -LiteralPath $assemblyBackup) { Remove-Item -LiteralPath $assemblyBackup -Recurse -Force }
 New-Item -Path $output -ItemType Directory -Force | Out-Null
 New-Item -Path $obfuscationOutput -ItemType Directory -Force | Out-Null
+New-Item -Path $assemblyBackup -ItemType Directory -Force | Out-Null
 
 dotnet publish (Join-Path $repoRoot "src\CodexDeepSeekSetup.Helper\CodexDeepSeekSetup.Helper.csproj") `
     -c $Configuration -r win-x64 --self-contained true -o $helperTemp `
@@ -46,17 +49,35 @@ $template.Replace("__INPUT_PATH__", $inputXmlPath).Replace("__OUTPUT_PATH__", $o
 dotnet tool run obfuscar.console -- $obfuscarConfig
 if ($LASTEXITCODE -ne 0) { throw "内部版混淆失败，退出码：$LASTEXITCODE" }
 
-foreach ($assemblyName in @("CodexDeepSeekSetup.Core.dll", "CodexDeepSeekSetup.App.Logic.dll")) {
+$protectedAssemblies = @("CodexDeepSeekSetup.Core.dll", "CodexDeepSeekSetup.App.Logic.dll")
+foreach ($assemblyName in $protectedAssemblies) {
     $protectedAssembly = Join-Path $obfuscationOutput $assemblyName
     if (-not (Test-Path -LiteralPath $protectedAssembly)) { throw "混淆输出缺失：$assemblyName" }
-    Copy-Item -LiteralPath $protectedAssembly -Destination (Join-Path $appBuildDirectory $assemblyName) -Force
+    Copy-Item -LiteralPath (Join-Path $appBuildDirectory $assemblyName) -Destination $assemblyBackup -Force
 }
 
-dotnet publish $appProject -c $Configuration -r win-x64 --self-contained true -o $output `
-    --no-build --no-restore `
-    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false `
-    -p:DebugType=None -p:DebugSymbols=false -p:DefineConstants=INTERNAL_BUILD
-if ($LASTEXITCODE -ne 0) { throw "主程序发布失败，退出码：$LASTEXITCODE" }
+try {
+    foreach ($assemblyName in $protectedAssemblies) {
+        Copy-Item -LiteralPath (Join-Path $obfuscationOutput $assemblyName) -Destination (Join-Path $appBuildDirectory $assemblyName) -Force
+    }
+
+    dotnet publish $appProject -c $Configuration -r win-x64 --self-contained true -o $output `
+        --no-build --no-restore `
+        -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false `
+        -p:DebugType=None -p:DebugSymbols=false -p:DefineConstants=INTERNAL_BUILD
+    if ($LASTEXITCODE -ne 0) { throw "主程序发布失败，退出码：$LASTEXITCODE" }
+}
+finally {
+    # Never leave obfuscated assemblies in bin/. Open-source or ordinary builds
+    # executed after this script must always start from the original outputs.
+    foreach ($assemblyName in $protectedAssemblies) {
+        $originalAssembly = Join-Path $assemblyBackup $assemblyName
+        if (Test-Path -LiteralPath $originalAssembly) {
+            Copy-Item -LiteralPath $originalAssembly -Destination (Join-Path $appBuildDirectory $assemblyName) -Force
+        }
+    }
+    if (Test-Path -LiteralPath $assemblyBackup) { Remove-Item -LiteralPath $assemblyBackup -Recurse -Force }
+}
 
 Copy-Item -LiteralPath (Join-Path $helperTemp "CodexDeepSeekSetup.Helper.exe") -Destination $output -Force
 if ((Test-Path -LiteralPath $msix) -and (Test-Path -LiteralPath $license)) {

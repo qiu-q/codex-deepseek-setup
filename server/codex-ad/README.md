@@ -6,6 +6,8 @@
 
 ```bash
 go test ./...
+go vet ./...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o codex-ad-server ./cmd/codex-ad-server
 ```
 
 ## 运行环境
@@ -25,4 +27,14 @@ CODEX_AD_PASSWORD_HASH=<bcrypt cost 12 hash>
 printf '%s\n' '至少二十位的随机密码' | ./codex-ad-server hash-password
 ```
 
-部署时将 `deploy/nginx-location.conf` 中的 location 加入现有 HTTPS `server` 块，并在 `nginx -t` 成功后重载。公开事件接口不记录访问日志；服务自身只持久化按活动编号汇总的展示量和点击量。
+首次部署可在服务器上用 root 执行：
+
+```bash
+sudo ./deploy/install.sh ./codex-ad-server '<bcrypt-hash>'
+```
+
+脚本会创建专用 `codex-ad` 系统用户、安装到 `/opt/codex-ad`、把数据保存在 `/var/lib/codex-ad`，并启用带 `NoNewPrivileges`、`ProtectSystem=strict`、`PrivateTmp` 的 systemd 服务。密码哈希保存在 root 可读的 `/etc/codex-ad/env`。
+
+将 `deploy/nginx-location.conf` 中的 location 加入现有 HTTPS `server` 块。修改 Nginx 前应创建带时间戳的配置备份，必须在 `nginx -t` 成功后才能重载。公开事件接口关闭访问日志；服务自身只持久化按活动编号汇总的展示量和点击量，不保存 IP。
+
+管理地址为 `https://www.qiuqiuqiu.top/xxx/codex-ad/admin/`。登录会话有效期 8 小时，Cookie 使用 Secure、HttpOnly、SameSite=Strict，并要求 CSRF Token；同一来源登录每分钟最多尝试 5 次。图片仅接受 PNG、JPEG、WebP，最大 2 MB。

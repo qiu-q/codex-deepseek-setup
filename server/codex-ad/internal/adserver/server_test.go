@@ -133,6 +133,31 @@ func TestMediaUploadRejectsSvg(t *testing.T) {
 	}
 }
 
+func TestMediaUploadRejectsFilesLargerThanTwoMegabytes(t *testing.T) {
+	server := newTestServer(t)
+	handler := server.Handler()
+	cookie, csrf := login(t, handler)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("image", "large.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write(append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 2*1024*1024)...))
+	_ = writer.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/admin/media", &body)
+	request.AddCookie(cookie)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("X-CSRF-Token", csrf)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized upload status = %d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestAdminPageIsEmbedded(t *testing.T) {
 	server := newTestServer(t)
 	response := perform(t, server.Handler(), http.MethodGet, "/admin/", nil, nil)

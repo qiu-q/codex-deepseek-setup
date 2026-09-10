@@ -19,6 +19,8 @@
 - 备份并合并 `%USERPROFILE%\.codex\config.toml`，保留已有 MCP、插件等无关配置；
 - 若官方桌面包没有生成用户级 CLI runtime，则从已验证安装包复制同版本 `codex*.exe` 配套文件到当前用户目录，并设置 `CODEX_CLI_PATH`（不修改或重打包 MSIX）。
 - 按“安装 Codex → 配置 DeepSeek → 完成”的三步向导自动推进，当前页只显示下一个应执行的操作。
+- DeepSeek 页面按“登录 → 实名认证 → 充值 → 创建 Key → 粘贴”的图示进度给出完成条件和下一步；验证失败会区分 Key 无效、余额不足、网络问题和接口不兼容。
+- 完成页逐项确认 Codex、Windows 凭据和配置文件状态，并提供“启动 Codex”和“查看首次使用教程”。启动成功后会直接显示下一步提示。
 - 随时提供“检测安装与清理数据”窗口，可查看位置和大小，并按项删除安装包、Codex、用户数据、CLI、凭据、缓存或安装助手自身。
 
 它不会安装或配置 FlClash、代理、VPN、DNS、路由或节点订阅，也不包含 API Key。
@@ -38,7 +40,7 @@ CodexDeepSeekSetup.Helper.exe
 2. 点击“下载并校验”，等待 MSIX 和许可证完成下载及签名校验。下载阶段不会请求管理员授权。
 3. 校验通过后点击“安装 Codex”。安装时的系统弹窗需要输入 **Windows 管理员密码**，不是 DeepSeek API Key。安装失败可直接重试，不会重复下载；只有官方离线部署失败时才会显示“实验性解包运行”。
 4. 在 DeepSeek 官方平台准备 API Key，粘贴后点击“验证并配置 Codex”。
-5. 在完成页启动 Codex，或关闭安装助手。
+5. 在完成页核对三项完成结果，点击“启动 Codex”；按钮变为“Codex 已启动”后即可新建任务并选择 DeepSeek 模型。清理功能位于折叠的“高级操作”。
 
 下载区域会持续显示文件级进度与总体进度。展开“查看详细记录”可查看检查、下载、校验、授权、部署、注册、CLI 和保存状态等阶段；记录只包含运行状态，不包含 API Key。
 
@@ -62,6 +64,8 @@ powershell -ExecutionPolicy Bypass -File .\build\Publish-OpenSource.ps1
 
 输出位于 `artifacts\open-source\win-x64`。
 
+发布脚本同时生成 ZIP、`release-report.json`、ZIP 的 `.sha256.txt` 校验文件，并检查辅助程序不超过 25 MB、无官方 MSIX 时发布 ZIP 不超过 85 MB。WPF 主程序保持不裁剪并启用单文件压缩；辅助程序使用完整裁剪、固定区域设置和单文件压缩，因此 Windows 10/11 无需另装 .NET 运行时。
+
 脚本生成的是未签名开发版。Windows 可能显示“未知发布者”或 SmartScreen 提示；对外分发前必须使用受信任的 Authenticode 证书签署两个 EXE。
 
 内部离线版只允许把未修改的 OpenAI 官方文件放在仓库根目录的 `payload` 文件夹，再执行：
@@ -70,11 +74,22 @@ powershell -ExecutionPolicy Bypass -File .\build\Publish-OpenSource.ps1
 powershell -ExecutionPolicy Bypass -File .\build\Publish-Internal.ps1
 ```
 
+内部版固定使用 Obfuscar 2.2.50，只处理 Core 和 App.Logic 的非公开实现；WPF 界面、公开接口、绑定/序列化/P/Invoke 名称不会重命名。混淆用于增加静态分析成本，不等同于加密。开源版不混淆、不连接推广接口。
+
+## 内部版推广
+
+推广只会在内部版配置成功后的完成页异步加载，明确标注“推广”，可以关闭。它不会弹窗、不会自动打开浏览器，也不会进入或修改官方 Codex；只有用户主动点击按钮时才会打开 HTTPS 页面。请求超时为 3 秒，断网、返回错误或图片加载失败不会影响安装、配置或启动。
+
+客户端只发送活动编号及 `impression`/`click` 事件：不生成设备 ID，不读取或发送用户名、硬件信息、Codex 数据或 DeepSeek Key。开源版没有广告和统计代码入口。
+
+推广服务位于 `server/codex-ad`，默认监听 `127.0.0.1:8765`，包含健康检查、当前广告、匿名汇总事件、带密码/CSRF 的管理后台和受限图片上传。部署说明见 [推广服务说明](server/codex-ad/README.md)。
+
 ## 安全边界
 
 - 下载主机被限制为 `persistent.oaistatic.com`，DeepSeek API 固定为 `https://api.deepseek.com/`。
 - 提权助手只接受受限命令；它会在管理员上下文再次验证 MSIX。
 - API Key 不进入 TOML、JSON、命令行参数、日志或构建产物。
+- 推广后台密码、服务器登录凭据和第三方密钥均不嵌入客户端；对外分发的内部版也只包含公开 HTTPS 接口地址。
 - 清理目录由程序从 Windows 已知用户目录推导；安全检查会拒绝磁盘根目录、用户目录根、桌面和任意外部路径。
 - 正式路径不解包运行；实验路径只解压通过官方签名和包身份校验的 MSIX，始终不重签名、不重新封包。
 - 实验路径可能缺少自动更新、通知、协议关联或部分沙盒能力，不属于 OpenAI 官方支持的独立 EXE 安装方式。
