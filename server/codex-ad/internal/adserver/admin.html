@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Codex 推广管理</title>
+  <style>
+    :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#172033;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}.top{background:#111827;color:#fff;padding:24px}.top h1{margin:0;font-size:25px}.top p{margin:7px 0 0;color:#cbd5e1}.wrap{max-width:1060px;margin:24px auto;padding:0 18px}.card{background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:22px;margin-bottom:18px;box-shadow:0 5px 18px #0f172a0d}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.wide{grid-column:1/-1}label{display:block;font-weight:650;margin-bottom:6px}input,textarea{width:100%;padding:11px;border:1px solid #b9c5d6;border-radius:8px;font:inherit}textarea{min-height:90px;resize:vertical}button{border:0;border-radius:8px;padding:11px 18px;font:inherit;font-weight:650;cursor:pointer;background:#2563eb;color:#fff}.secondary{background:#e2e8f0;color:#172033}.danger{background:#b91c1c}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.muted{color:#64748b}.hidden{display:none}.status{padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1e3a8a;margin-top:12px}.preview{border:1px solid #fdba74;background:#fff7ed;border-radius:10px;padding:16px;display:grid;grid-template-columns:140px 1fr;gap:15px}.preview img{width:140px;height:90px;object-fit:cover;border-radius:7px;background:#e2e8f0}.tag{font-size:12px;color:#9a3412;font-weight:700}.numbers{display:flex;gap:30px}.numbers strong{display:block;font-size:25px}.toggle{width:auto}.login{max-width:440px;margin:70px auto}.error{background:#fef2f2;color:#991b1b}@media(max-width:700px){.grid{grid-template-columns:1fr}.preview{grid-template-columns:1fr}.numbers{gap:15px}}
+  </style>
+</head>
+<body>
+  <header class="top"><h1>Codex 推广管理</h1><p>配置只会显示在内部版安装助手的完成页。</p></header>
+  <main class="wrap">
+    <section id="login" class="card login">
+      <h2>管理员登录</h2>
+      <label for="password">后台密码</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button id="loginButton" style="margin-top:14px">登录</button>
+      <div id="loginStatus" class="status hidden"></div>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <div class="card row" style="justify-content:space-between"><div><strong>当前推广</strong><div class="muted">关闭投放后客户端接口会立即返回空内容。</div></div><button id="logout" class="secondary">退出</button></div>
+      <form id="adForm" class="card">
+        <div class="grid">
+          <div class="wide row"><input id="enabled" class="toggle" type="checkbox"><label for="enabled" style="margin:0">启用投放</label></div>
+          <div><label for="campaignId">活动编号</label><input id="campaignId" maxlength="80" required></div>
+          <div><label for="ctaText">按钮文字</label><input id="ctaText" maxlength="16" required></div>
+          <div class="wide"><label for="title">标题</label><input id="title" maxlength="60" required></div>
+          <div class="wide"><label for="body">说明</label><textarea id="body" maxlength="180" required></textarea></div>
+          <div class="wide"><label for="targetUrl">点击地址（HTTPS）</label><input id="targetUrl" type="url" pattern="https://.*" required></div>
+          <div><label for="startsAt">开始时间（可选）</label><input id="startsAt" type="datetime-local"></div>
+          <div><label for="endsAt">结束时间（可选）</label><input id="endsAt" type="datetime-local"></div>
+          <div class="wide"><label for="imageFile">推广图片（PNG/JPEG/WebP，最大 2 MB）</label><div class="row"><input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp" style="flex:1"><button id="upload" type="button" class="secondary">上传图片</button></div><input id="imageUrl" type="hidden"></div>
+        </div>
+        <h3>客户端预览</h3>
+        <div class="preview"><img id="previewImage" alt="推广图片"><div><span class="tag">推广</span><h3 id="previewTitle">推广标题</h3><p id="previewBody">推广说明</p><button type="button" id="previewButton">了解详情</button><div id="previewDomain" class="muted" style="margin-top:8px"></div></div></div>
+        <div class="row" style="margin-top:18px"><button type="submit">保存推广配置</button><span id="saveStatus" class="muted"></span></div>
+      </form>
+
+      <section class="card"><h2>匿名汇总</h2><div class="numbers"><div><strong id="impressions">0</strong><span class="muted">展示</span></div><div><strong id="clicks">0</strong><span class="muted">点击</span></div><div><strong id="ctr">0%</strong><span class="muted">点击率</span></div></div><p class="muted">不保存设备标识、用户名或客户端 IP。</p></section>
+    </section>
+  </main>
+  <script>
+    let csrf=''; const $=id=>document.getElementById(id);
+    const api=async(path,options={})=>{options.headers={...(options.headers||{}),...(csrf?{'X-CSRF-Token':csrf}:{})};const r=await fetch('../'+path,options);if(!r.ok)throw new Error((await r.text()).trim()||('HTTP '+r.status));return r.status===204?null:r.json()};
+    const showStatus=(id,text,error=false)=>{const e=$(id);e.textContent=text;e.className='status'+(error?' error':'')};
+    $('loginButton').onclick=async()=>{try{const data=await api('api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('password').value})});csrf=data.csrfToken;$('password').value='';$('login').classList.add('hidden');$('dashboard').classList.remove('hidden');await load()}catch(e){showStatus('loginStatus',e.message,true)}};
+    $('logout').onclick=async()=>{try{await api('api/admin/logout',{method:'POST'})}finally{csrf='';$('dashboard').classList.add('hidden');$('login').classList.remove('hidden')}};
+    const localValue=v=>v?new Date(v).toISOString().slice(0,16):''; const iso=id=>$(id).value?new Date($(id).value).toISOString():null;
+    async function load(){const [ad,stats]=await Promise.all([api('api/admin/ad'),api('api/admin/stats')]);for(const key of ['campaignId','title','body','ctaText','targetUrl','imageUrl'])$(key).value=ad[key]||'';$('enabled').checked=!!ad.enabled;$('startsAt').value=localValue(ad.startsAt);$('endsAt').value=localValue(ad.endsAt);render();const s=(stats.campaigns||{})[ad.campaignId]||{};const i=s.impressions||0,c=s.clicks||0;$('impressions').textContent=i;$('clicks').textContent=c;$('ctr').textContent=(i?c/i*100:0).toFixed(1)+'%'}
+    function render(){const title=$('title').value||'推广标题',body=$('body').value||'推广说明',cta=$('ctaText').value||'了解详情',url=$('targetUrl').value,image=$('imageUrl').value;$('previewTitle').textContent=title;$('previewBody').textContent=body;$('previewButton').textContent=cta;$('previewImage').src=image||'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="140" height="90"%3E%3Crect width="100%25" height="100%25" fill="%23e2e8f0"/%3E%3C/svg%3E';try{$('previewDomain').textContent=new URL(url).host}catch{$('previewDomain').textContent=''}}
+    document.querySelectorAll('#adForm input,#adForm textarea').forEach(e=>e.addEventListener('input',render));
+    $('upload').onclick=async()=>{const file=$('imageFile').files[0];if(!file)return;const form=new FormData();form.append('image',file);try{const data=await api('api/admin/media',{method:'POST',body:form});$('imageUrl').value=data.imageUrl;render();$('saveStatus').textContent='图片已上传，请保存配置'}catch(e){$('saveStatus').textContent=e.message}};
+    $('adForm').onsubmit=async event=>{event.preventDefault();const ad={version:1,enabled:$('enabled').checked,campaignId:$('campaignId').value.trim(),title:$('title').value.trim(),body:$('body').value.trim(),ctaText:$('ctaText').value.trim(),targetUrl:$('targetUrl').value.trim(),imageUrl:$('imageUrl').value,startsAt:iso('startsAt'),endsAt:iso('endsAt')};try{await api('api/admin/ad',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(ad)});$('saveStatus').textContent='已保存';await load()}catch(e){$('saveStatus').textContent=e.message}};
+  </script>
+</body>
+</html>
