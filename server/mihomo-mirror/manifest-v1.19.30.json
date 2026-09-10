@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "product": "mihomo",
+  "release": "v1.19.30",
+  "license": "GPL-3.0-only",
+  "upstream": "https://github.com/MetaCubeX/mihomo",
+  "files": [
+    {
+      "name": "mihomo-windows-amd64-compatible-v1.19.30.zip",
+      "size": 18529108,
+      "sha256": "289fde5e29d37a5b3326480590d8b3551c5bf7f8737290355c19bce74d57a563",
+      "upstreamUrl": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.30/mihomo-windows-amd64-compatible-v1.19.30.zip"
+    },
+    {
+      "name": "mihomo-v1.19.30-source.tar.gz",
+      "size": 1228535,
+      "sha256": "ee8a7107707e4bd485460139b1944e7be30016393783f2b4e928c14880c8ca8b",
+      "upstreamUrl": "https://github.com/MetaCubeX/mihomo/archive/refs/tags/v1.19.30.tar.gz"
+    },
+    {
+      "name": "LICENSE-GPL-3.0.txt",
+      "size": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "upstreamUrl": "https://raw.githubusercontent.com/MetaCubeX/mihomo/Meta/LICENSE"
+    }
+  ]
+}
