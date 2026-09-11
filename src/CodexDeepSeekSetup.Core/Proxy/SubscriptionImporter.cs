@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.Core.Proxy;
@@ -35,11 +34,11 @@ public sealed class SubscriptionImporter(HttpClient http)
             }
 
             response.EnsureSuccessStatusCode();
-            if (IsHtml(response.Content.Headers.ContentType) || response.Content.Headers.ContentLength is > MaximumBytes)
+            if (response.Content.Headers.ContentLength is > MaximumBytes)
             {
                 return OperationResult<string>.Failure(
-                    response.Content.Headers.ContentLength is > MaximumBytes ? "proxy.subscription.size" : "proxy.subscription.content",
-                    response.Content.Headers.ContentLength is > MaximumBytes ? "订阅内容超过 8 MB" : "订阅地址返回了网页而不是节点配置");
+                    "proxy.subscription.size",
+                    "订阅内容超过 8 MB");
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
@@ -89,10 +88,6 @@ public sealed class SubscriptionImporter(HttpClient http)
             DeleteIfPresent(partialPath);
         }
     }
-
-    private static bool IsHtml(MediaTypeHeaderValue? contentType) =>
-        contentType?.MediaType?.Equals("text/html", StringComparison.OrdinalIgnoreCase) == true ||
-        contentType?.MediaType?.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase) == true;
 
     private static async Task<bool> LooksLikeHtmlAsync(string path, CancellationToken cancellationToken)
     {

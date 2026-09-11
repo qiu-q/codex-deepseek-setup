@@ -92,6 +92,22 @@ public sealed class SubscriptionImporterTests : IDisposable
         Assert.Equal("clash.meta", userAgent);
     }
 
+    [Fact]
+    public async Task ImportAsync_AcceptsClashYamlWhenProviderMislabelsItAsHtml()
+    {
+        var destination = Path.Combine(root, "providers", "subscription.yaml");
+        var handler = new SubscriptionHandler(request => Response(
+            request,
+            "proxies:\n- name: mislabeled-provider\n  type: ss\n",
+            "text/html"));
+
+        var result = await new SubscriptionImporter(new HttpClient(handler))
+            .ImportAsync(new Uri("https://provider.example/sub"), destination, default);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains("mislabeled-provider", await File.ReadAllTextAsync(destination));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))
