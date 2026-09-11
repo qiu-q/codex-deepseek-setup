@@ -144,7 +144,9 @@ public partial class MainWindow : Window
         {
             SubscriptionUrlBox.Clear();
             NetworkHelperProgressBar.Value = 100;
-            NetworkHelperStatusText.Text = "网络辅助已启用，并会在当前用户登录 Windows 后自动恢复运行。下一步请创建并填写 DeepSeek API Key。";
+            SelectNetworkNodeButton.IsEnabled = true;
+            NetworkHelperStatusText.Text = "网络辅助已启用，正在读取可选节点……";
+            await ShowNodeSelectionAsync(automatic: true);
         }
         else if (result is { ErrorMessage: not null })
         {
@@ -159,6 +161,10 @@ public partial class MainWindow : Window
         var result = await RunUiAsync(() => actions.DisableNetworkHelperAsync(lifetime.Token));
         SetNetworkButtons(true);
         NetworkHelperProgressBar.Value = 0;
+        if (result?.IsSuccess == true)
+        {
+            SelectNetworkNodeButton.IsEnabled = false;
+        }
         NetworkHelperStatusText.Text = result?.IsSuccess == true
             ? "已停止网络辅助，并恢复启用前的 Windows 当前用户代理设置。"
             : result?.ErrorMessage ?? "停用未完成，请重试。";
@@ -168,6 +174,41 @@ public partial class MainWindow : Window
     {
         EnableNetworkHelperButton.IsEnabled = enabled;
         DisableNetworkHelperButton.IsEnabled = enabled;
+        if (!enabled)
+        {
+            SelectNetworkNodeButton.IsEnabled = false;
+        }
+    }
+
+    private async void SelectNetworkNodeButton_Click(object sender, RoutedEventArgs e) =>
+        await ShowNodeSelectionAsync(automatic: false);
+
+    private async Task ShowNodeSelectionAsync(bool automatic)
+    {
+        SelectNetworkNodeButton.IsEnabled = false;
+        var result = await RunUiAsync(() => actions.GetNetworkNodesAsync(lifetime.Token));
+        SelectNetworkNodeButton.IsEnabled = true;
+        if (result?.IsSuccess != true)
+        {
+            var message = result?.ErrorMessage ?? "暂时无法读取节点，请稍后点击“选择节点”重试。";
+            NetworkHelperStatusText.Text = message;
+            if (!automatic)
+            {
+                MessageBox.Show(this, message, "节点列表不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            return;
+        }
+
+        var dialog = new NodeSelectionDialog(actions, result.Value!) { Owner = this };
+        if (dialog.ShowDialog() == true)
+        {
+            NetworkHelperStatusText.Text = $"已应用节点：{dialog.SelectedNodeDisplayName}。网络辅助会在当前用户登录 Windows 后自动恢复运行。";
+        }
+        else
+        {
+            var current = result.Value!.FirstOrDefault(node => node.IsSelected)?.Name ?? "AUTO";
+            NetworkHelperStatusText.Text = $"节点选择已关闭，继续使用：{NodeSelectionDialog.GetDisplayName(current)}。可随时点击“选择节点”更改。";
+        }
     }
 
     private async void EnableAdministratorCompatibilityButton_Click(object sender, RoutedEventArgs e)
@@ -272,7 +313,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<OperationResult<Unit>?> RunUiAsync(Func<Task<OperationResult<Unit>>> operation)
+    private async Task<OperationResult<T>?> RunUiAsync<T>(Func<Task<OperationResult<T>>> operation)
     {
         try
         {

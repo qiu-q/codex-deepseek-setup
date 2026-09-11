@@ -8,6 +8,7 @@ using CodexDeepSeekSetup.Core.Configuration;
 using CodexDeepSeekSetup.Core.DeepSeek;
 using CodexDeepSeekSetup.Core.Downloads;
 using CodexDeepSeekSetup.Core.Results;
+using CodexDeepSeekSetup.Core.Proxy;
 using CodexDeepSeekSetup.Core.Workflow;
 using CodexDeepSeekSetup.Windows.Cleanup;
 using CodexDeepSeekSetup.Windows.Diagnostics;
@@ -20,7 +21,7 @@ using CodexDeepSeekSetup.Windows.Storage;
 namespace CodexDeepSeekSetup.App;
 
 [SupportedOSPlatform("windows")]
-public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
+public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions, INetworkNodeActions
 {
     private readonly BuildFlavorOptions flavor;
     private readonly OfficialDownloadService downloader;
@@ -192,6 +193,21 @@ public sealed class DesktopSetupActions : IWizardActions, IMaintenanceActions
         proxyLifecycle is null
             ? Task.FromResult(OperationResult<Unit>.Success(default))
             : proxyLifecycle.DisableAsync(true, true, true, cancellationToken);
+
+    public Task<OperationResult<IReadOnlyList<ProxyNode>>> GetNetworkNodesAsync(CancellationToken cancellationToken) =>
+        proxyLifecycle is null
+            ? Task.FromResult(OperationResult<IReadOnlyList<ProxyNode>>.Failure("proxy.disabled", "网络辅助功能不可用"))
+            : proxyLifecycle.GetNodesAsync(cancellationToken);
+
+    public Task<OperationResult<int>> GetNetworkNodeDelayAsync(string nodeName, CancellationToken cancellationToken) =>
+        proxyLifecycle is null
+            ? Task.FromResult(OperationResult<int>.Failure("proxy.disabled", "网络辅助功能不可用"))
+            : proxyLifecycle.GetNodeDelayAsync(nodeName, cancellationToken);
+
+    public Task<OperationResult<Unit>> SelectNetworkNodeAsync(string nodeName, CancellationToken cancellationToken) =>
+        proxyLifecycle is null
+            ? Task.FromResult(Failure("proxy.disabled", "网络辅助功能不可用"))
+            : proxyLifecycle.SelectNodeAsync(nodeName, cancellationToken);
 
     public async Task<OperationResult<IReadOnlyList<MaintenanceArtifactInfo>>> ScanAsync(
         CancellationToken cancellationToken)

@@ -81,6 +81,7 @@ public sealed class ProxyLifecycleService(
     WindowsUserProxyManager proxyManager,
     ISecretStore secretStore,
     IProxyStartupRegistration startupRegistration,
+    HttpClient controllerHttp,
     ProxyPaths paths)
 {
     public const int MixedPort = 17890;
@@ -96,6 +97,7 @@ public sealed class ProxyLifecycleService(
             new WindowsUserProxyManager(new RegistryUserProxyRegistry(), new WindowsProxySettingsBroadcaster(), resolved.RecoveryMarkerPath),
             new WindowsCredentialStore(),
             new WindowsProxyStartupRegistration(),
+            http,
             resolved);
     }
 
@@ -170,6 +172,47 @@ public sealed class ProxyLifecycleService(
         return OperationResult<Unit>.Success(default);
     }
 
+    public async Task<OperationResult<IReadOnlyList<ProxyNode>>> GetNodesAsync(CancellationToken cancellationToken)
+    {
+        var controller = CreateController();
+        if (!controller.IsSuccess)
+        {
+            return OperationResult<IReadOnlyList<ProxyNode>>.Failure(controller.ErrorCode!, controller.ErrorMessage!);
+        }
+
+        OperationResult<IReadOnlyList<ProxyNode>>? result = null;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            result = await controller.Value!.GetNodesAsync(cancellationToken).ConfigureAwait(false);
+            if (result.IsSuccess)
+            {
+                return result;
+            }
+
+            await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+        }
+
+        return result ?? OperationResult<IReadOnlyList<ProxyNode>>.Failure(
+            "proxy.controller.nodes",
+            "Mihomo 尚未准备好节点列表");
+    }
+
+    public async Task<OperationResult<int>> GetNodeDelayAsync(string nodeName, CancellationToken cancellationToken)
+    {
+        var controller = CreateController();
+        return controller.IsSuccess
+            ? await controller.Value!.GetDelayAsync(nodeName, cancellationToken).ConfigureAwait(false)
+            : OperationResult<int>.Failure(controller.ErrorCode!, controller.ErrorMessage!);
+    }
+
+    public async Task<OperationResult<Unit>> SelectNodeAsync(string nodeName, CancellationToken cancellationToken)
+    {
+        var controller = CreateController();
+        return controller.IsSuccess
+            ? await controller.Value!.SelectAsync(nodeName, cancellationToken).ConfigureAwait(false)
+            : OperationResult<Unit>.Failure(controller.ErrorCode!, controller.ErrorMessage!);
+    }
+
     public async Task<OperationResult<Unit>> StartSavedAsync(CancellationToken cancellationToken)
     {
         var saved = secretStore.Read(CredentialTargets.ProxySubscription);
@@ -213,6 +256,39 @@ public sealed class ProxyLifecycleService(
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             return OperationResult<Unit>.Failure("proxy.helper.install", "无法安装网络辅助组件");
+        }
+    }
+
+    private OperationResult<MihomoControllerClient> CreateController()
+    {
+        try
+        {
+            var secretPath = Path.Combine(paths.DataDirectory, MihomoConfigWriter.ControllerSecretFileName);
+            if (!File.Exists(secretPath))
+            {
+                return OperationResult<MihomoControllerClient>.Failure(
+                    "proxy.controller.secret",
+                    "网络辅助尚未启动，请先填写订阅并启用");
+            }
+
+            var secret = File.ReadAllText(secretPath).Trim();
+            if (secret.Length < 32)
+            {
+                return OperationResult<MihomoControllerClient>.Failure(
+                    "proxy.controller.secret",
+                    "Mihomo 本地控制密钥无效，请重新启用网络辅助");
+            }
+
+            return OperationResult<MihomoControllerClient>.Success(new MihomoControllerClient(
+                controllerHttp,
+                new Uri($"http://127.0.0.1:{MihomoConfigWriter.ControllerPort}/"),
+                secret));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return OperationResult<MihomoControllerClient>.Failure(
+                "proxy.controller.secret",
+                "无法读取 Mihomo 本地控制密钥");
         }
     }
 

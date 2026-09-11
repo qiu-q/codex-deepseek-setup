@@ -1,0 +1,47 @@
+<Window x:Class="CodexDeepSeekSetup.App.NodeSelectionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="选择网络节点" Width="680" Height="620" MinWidth="560" MinHeight="480"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{StaticResource PageBrush}" FontFamily="Microsoft YaHei UI">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,18">
+            <StackPanel>
+                <TextBlock Text="选择网络节点" FontSize="21" FontWeight="SemiBold"/>
+                <TextBlock Text="默认使用自动测速。选择具体节点后，Mihomo 会记住该选择。" Foreground="{StaticResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+        </Border>
+        <Grid Grid.Row="1" Margin="24,20">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Border Style="{StaticResource InfoAlert}" Margin="0,0,0,14">
+                <TextBlock x:Name="NodeStatusText" Text="请选择节点；需要时可先测试所选节点延迟。" TextWrapping="Wrap" Foreground="#337ECC"/>
+            </Border>
+            <ListBox x:Name="NodeList" Grid.Row="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="10,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" Text="当前使用" Foreground="{StaticResource SuccessBrush}" VerticalAlignment="Center" Margin="16,0,0,0" Visibility="{Binding CurrentVisibility}"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Grid.Row="2" Text="控制接口仅监听 127.0.0.1，并使用随机密钥；不会对局域网开放。" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+        </Grid>
+        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="24,14">
+            <Grid>
+                <Button Content="关闭" Click="CloseButton_Click" HorizontalAlignment="Left"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="TestDelayButton" Content="测试所选延迟" Click="TestDelayButton_Click"/>
+                    <Button x:Name="UseAutoButton" Content="使用自动选择" Click="UseAutoButton_Click"/>
+                    <Button x:Name="ApplyNodeButton" Content="应用所选节点" Click="ApplyNodeButton_Click" Style="{StaticResource PrimaryButton}" Margin="0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using CodexDeepSeekSetup.App.Logic;
 using CodexDeepSeekSetup.Core.Guides;
+using CodexDeepSeekSetup.Core.Proxy;
 using CodexDeepSeekSetup.Core.Results;
 
 namespace CodexDeepSeekSetup.App.Windows.Tests;
@@ -46,6 +47,7 @@ public sealed class MainWindowStartupTests
                 Assert.IsType<PasswordBox>(window.FindName("SubscriptionUrlBox"));
                 Assert.IsType<Button>(window.FindName("EnableNetworkHelperButton"));
                 Assert.IsType<Button>(window.FindName("DisableNetworkHelperButton"));
+                Assert.IsType<Button>(window.FindName("SelectNetworkNodeButton"));
                 var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
                 var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
                 var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));
@@ -114,6 +116,41 @@ public sealed class MainWindowStartupTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "GuideDialog structure check timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void NodeSelectionDialog_ContainsSelectionAndDelayControls()
+    {
+        Exception? failure = null;
+        using var completed = new ManualResetEventSlim();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                _ = Application.Current ?? new Application();
+                var window = new NodeSelectionDialog(
+                    new FakeNetworkNodeActions(),
+                    [new ProxyNode("AUTO", true), new ProxyNode("日本 01", false)]);
+                Assert.IsType<ListBox>(window.FindName("NodeList"));
+                Assert.IsType<Button>(window.FindName("TestDelayButton"));
+                Assert.IsType<Button>(window.FindName("UseAutoButton"));
+                Assert.IsType<Button>(window.FindName("ApplyNodeButton"));
+                window.Close();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "Node selection dialog structure check timed out.");
         Assert.Null(failure);
     }
 
@@ -199,5 +236,14 @@ public sealed class MainWindowStartupTests
             IReadOnlyCollection<string> artifactIds,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult<MaintenanceCleanupOutcome>.Success(new(false)));
+    }
+
+    private sealed class FakeNetworkNodeActions : INetworkNodeActions
+    {
+        public Task<OperationResult<int>> GetNetworkNodeDelayAsync(string nodeName, CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult<int>.Success(61));
+
+        public Task<OperationResult<Unit>> SelectNetworkNodeAsync(string nodeName, CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult<Unit>.Success(default));
     }
 }
