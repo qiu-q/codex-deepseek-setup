@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "enabled": true,
+  "title": "DeepSeek 实名认证、充值与 API Key 创建",
+  "steps": [
+    {
+      "id": "open-top-up",
+      "title": "进入充值页并开始实名认证",
+      "body": "登录 DeepSeek 开放平台后打开充值页。若页面提示尚未完成实名认证，请点击“去认证”；身份资料只在 DeepSeek 官方页面填写，本助手不会读取。",
+      "completionHint": "看到个人实名认证窗口后，进入下一步",
+      "actionText": "打开充值页",
+      "actionUrl": "https://platform.deepseek.com/top_up",
+      "imageUrl": "https://www.qiuqiuqiu.top/xxx/codex-ad/media/01-top-up.png"
+    },
+    {
+      "id": "real-name",
+      "title": "完成个人实名认证",
+      "body": "在官方认证窗口填写真实姓名、选择证件类型并填写证件号码，阅读并勾选协议后提交。请勿把姓名、证件号或验证码粘贴到安装助手。",
+      "completionHint": "页面显示认证通过后，返回充值页完成充值",
+      "actionText": "继续认证",
+      "actionUrl": "https://platform.deepseek.com/top_up",
+      "imageUrl": "https://www.qiuqiuqiu.top/xxx/codex-ad/media/02-real-name.png"
+    },
+    {
+      "id": "create-api-key",
+      "title": "创建 API Key",
+      "body": "充值完成后进入 API keys 页面，点击“创建 API key”，填写便于识别的名称（例如 Codex），然后点击“创建”。",
+      "completionHint": "看到“API key 已创建”的弹窗后，进入下一步",
+      "actionText": "打开 API Keys",
+      "actionUrl": "https://platform.deepseek.com/api_keys",
+      "imageUrl": "https://www.qiuqiuqiu.top/xxx/codex-ad/media/03-create-key.png"
+    },
+    {
+      "id": "copy-api-key",
+      "title": "复制并妥善保存 API Key",
+      "body": "新 Key 通常只完整显示一次。点击“复制”，先保存到安全位置，再粘贴到安装助手的 DeepSeek API Key 输入框。不要发给他人，也不要截图分享。",
+      "completionHint": "Key 已复制并粘贴到安装助手，即可关闭教程",
+      "actionText": "返回 API Keys",
+      "actionUrl": "https://platform.deepseek.com/api_keys",
+      "imageUrl": "https://www.qiuqiuqiu.top/xxx/codex-ad/media/04-copy-key-redacted.png"
+    }
+  ]
+}
