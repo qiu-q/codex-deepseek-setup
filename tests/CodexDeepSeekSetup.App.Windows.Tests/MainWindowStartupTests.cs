@@ -1,7 +1,9 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.App.Logic.Diagnostics;
 using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Proxy;
 using CodexDeepSeekSetup.Core.Results;
@@ -48,6 +50,8 @@ public sealed class MainWindowStartupTests
                 Assert.IsType<Button>(window.FindName("EnableNetworkHelperButton"));
                 Assert.IsType<Button>(window.FindName("DisableNetworkHelperButton"));
                 Assert.IsType<Button>(window.FindName("SelectNetworkNodeButton"));
+                Assert.IsType<Button>(window.FindName("ViewDiagnosticLogButton"));
+                Assert.IsType<Button>(window.FindName("CopyDiagnosticLogButton"));
                 var downloadButton = Assert.IsType<Button>(window.FindName("DownloadCodexButton"));
                 var installButton = Assert.IsType<Button>(window.FindName("InstallCodexButton"));
                 var fileProgress = Assert.IsType<ProgressBar>(window.FindName("FileProgressBar"));
@@ -151,6 +155,45 @@ public sealed class MainWindowStartupTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "Node selection dialog structure check timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void DiagnosticLogDialog_ContainsCopyAndExportControls()
+    {
+        Exception? failure = null;
+        using var completed = new ManualResetEventSlim();
+        var thread = new Thread(() =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "codex-diagnostic-window-tests", Guid.NewGuid().ToString("N"));
+            try
+            {
+                _ = Application.Current ?? new Application();
+                var log = new DiagnosticLog(root, sessionDescription: "window test");
+                var window = new DiagnosticLogDialog(log);
+                var text = Assert.IsType<TextBox>(window.FindName("DiagnosticLogTextBox"));
+                Assert.True(text.IsReadOnly);
+                Assert.IsType<Button>(window.FindName("CopyAllDiagnosticLogButton"));
+                Assert.IsType<Button>(window.FindName("ExportDiagnosticLogButton"));
+                window.Close();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                if (Directory.Exists(root))
+                {
+                    Directory.Delete(root, recursive: true);
+                }
+                completed.Set();
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(15)), "Diagnostic log dialog structure check timed out.");
         Assert.Null(failure);
     }
 

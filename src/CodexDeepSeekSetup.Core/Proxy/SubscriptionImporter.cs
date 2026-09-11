@@ -75,18 +75,34 @@ public sealed class SubscriptionImporter(HttpClient http)
         {
             throw;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException error)
         {
-            return OperationResult<string>.Failure("proxy.subscription.network", "无法下载订阅内容");
+            return OperationResult<string>.Failure(
+                "proxy.subscription.network",
+                "无法下载订阅内容",
+                DescribeFailure(subscriptionUri, error));
         }
-        catch (IOException)
+        catch (IOException error)
         {
-            return OperationResult<string>.Failure("proxy.subscription.file", "无法保存订阅内容");
+            return OperationResult<string>.Failure(
+                "proxy.subscription.file",
+                "无法保存订阅内容",
+                DescribeFailure(subscriptionUri, error));
         }
         finally
         {
             DeleteIfPresent(partialPath);
         }
+    }
+
+    private static string DescribeFailure(Uri subscriptionUri, Exception error)
+    {
+        var endpoint = subscriptionUri.GetLeftPart(UriPartial.Authority) + subscriptionUri.AbsolutePath;
+        var statusCode = (error as HttpRequestException)?.StatusCode;
+        var status = statusCode is { } actualStatus
+            ? $" HTTP {(int)actualStatus} ({actualStatus})"
+            : string.Empty;
+        return $"endpoint={endpoint}; exception={error.GetType().Name};{status}; message={error.Message}";
     }
 
     private static async Task<bool> LooksLikeHtmlAsync(string path, CancellationToken cancellationToken)

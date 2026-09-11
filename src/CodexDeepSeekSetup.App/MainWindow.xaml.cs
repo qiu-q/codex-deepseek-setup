@@ -1,10 +1,13 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows.Media.Imaging;
 using System.Windows;
 using System.Windows.Controls;
 using CodexDeepSeekSetup.App.Logic;
+using CodexDeepSeekSetup.App.Logic.Diagnostics;
 using CodexDeepSeekSetup.Core.Advertisements;
 using CodexDeepSeekSetup.Core.Guides;
 using CodexDeepSeekSetup.Core.Results;
@@ -18,6 +21,7 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel viewModel;
     private readonly HttpClient? advertisementHttp;
     private readonly AdvertisementImageDownloader? advertisementImageDownloader;
+    private readonly DiagnosticLog diagnosticLog;
     private readonly CancellationTokenSource lifetime = new();
     private bool initialized;
 
@@ -31,6 +35,8 @@ public partial class MainWindow : Window
             BuildFlavor.OpenSource;
 #endif
         var options = BuildFlavorOptions.For(flavor);
+        diagnosticLog = CreateDiagnosticLog(flavor);
+        diagnosticLog.Write("startup", "application window constructed");
         actions = DesktopSetupActions.Create(options);
         NetworkHelperCard.Visibility = options.EnableProxyConfiguration ? Visibility.Visible : Visibility.Collapsed;
         IAdvertisementClient? advertisementClient = null;
@@ -66,6 +72,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        diagnosticLog.Write("shutdown", "application window closed");
         lifetime.Cancel();
         lifetime.Dispose();
         advertisementHttp?.Dispose();
@@ -124,7 +131,7 @@ public partial class MainWindow : Window
         }
         else if (result is { ErrorMessage: not null })
         {
-            MessageBox.Show(this, result.ErrorMessage, "DeepSeek 配置未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowOperationFailure(result, "DeepSeek 配置未完成");
         }
     }
 
@@ -137,6 +144,7 @@ public partial class MainWindow : Window
         {
             NetworkHelperProgressBar.Value = update.Percent;
             NetworkHelperStatusText.Text = update.Message;
+            diagnosticLog.Write("network-helper.progress", $"percent={update.Percent:0}; message={update.Message}");
         });
         var result = await RunUiAsync(() => actions.EnableNetworkHelperAsync(subscription, progress, lifetime.Token));
         SetNetworkButtons(true);
@@ -151,7 +159,7 @@ public partial class MainWindow : Window
         else if (result is { ErrorMessage: not null })
         {
             NetworkHelperStatusText.Text = result.ErrorMessage;
-            MessageBox.Show(this, result.ErrorMessage, "网络辅助未启用", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowOperationFailure(result, "网络辅助未启用");
         }
     }
 
@@ -194,7 +202,14 @@ public partial class MainWindow : Window
             NetworkHelperStatusText.Text = message;
             if (!automatic)
             {
-                MessageBox.Show(this, message, "节点列表不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (result is not null)
+                {
+                    ShowOperationFailure(result, "节点列表不可用");
+                }
+                else
+                {
+                    MessageBox.Show(this, message, "节点列表不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
             return;
         }
@@ -229,12 +244,7 @@ public partial class MainWindow : Window
             viewModel.EnableBuiltInAdministratorCompatibilityAsync(lifetime.Token));
         if (result is { IsSuccess: false, ErrorMessage: not null })
         {
-            MessageBox.Show(
-                this,
-                result.ErrorMessage,
-                "未能启用兼容模式",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            ShowOperationFailure(result, "未能启用兼容模式", MessageBoxImage.Error);
         }
     }
 
@@ -278,7 +288,9 @@ public partial class MainWindow : Window
             var result = viewModel.SelectDownloadDirectory(dialog.FolderName);
             if (!result.IsSuccess)
             {
-                MessageBox.Show(this, result.ErrorMessage, "目录不可用", MessageBoxButton.OK, MessageBoxImage.Warning);
+                diagnosticLog.RecordResult("select-download-directory", result);
+                MarkDiagnosticFailure();
+                ShowOperationFailure(result, "目录不可用");
             }
         }
     }
@@ -313,20 +325,102 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task<OperationResult<T>?> RunUiAsync<T>(Func<Task<OperationResult<T>>> operation)
+    private async Task<OperationResult<T>?> RunUiAsync<T>(
+        Func<Task<OperationResult<T>>> operation,
+        [CallerMemberName] string operationName = "operation")
     {
+        diagnosticLog.Write(operationName, "result=started");
         try
         {
-            return await operation();
+            var result = await operation();
+            diagnosticLog.RecordResult(operationName, result);
+            if (!result.IsSuccess)
+            {
+                MarkDiagnosticFailure();
+            }
+            return result;
         }
         catch (OperationCanceledException)
         {
+            diagnosticLog.Write(operationName, "result=cancelled");
             return null;
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            MessageBox.Show(this, "操作遇到未预期错误。请重新打开程序后重试。", "安装助手", MessageBoxButton.OK, MessageBoxImage.Error);
+            diagnosticLog.RecordException(operationName, error);
+            MarkDiagnosticFailure();
+            MessageBox.Show(
+                this,
+                "操作遇到未预期错误。请点击窗口右下角“查看错误日志”，复制日志后发送给技术人员。",
+                "安装助手",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             return null;
+        }
+    }
+
+    private void ViewDiagnosticLogButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new DiagnosticLogDialog(diagnosticLog) { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    private async void CopyDiagnosticLogButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Clipboard.SetText(diagnosticLog.Snapshot());
+            var original = CopyDiagnosticLogButton.Content;
+            CopyDiagnosticLogButton.Content = "已复制";
+            await Task.Delay(TimeSpan.FromSeconds(1.5), lifetime.Token);
+            CopyDiagnosticLogButton.Content = original;
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception error) when (error is InvalidOperationException or COMException)
+        {
+            diagnosticLog.RecordException("diagnostics-copy", error);
+            var dialog = new DiagnosticLogDialog(diagnosticLog) { Owner = this };
+            dialog.ShowDialog();
+        }
+    }
+
+    private void ShowOperationFailure<T>(
+        OperationResult<T> result,
+        string title,
+        MessageBoxImage icon = MessageBoxImage.Warning)
+    {
+        var errorCode = string.IsNullOrWhiteSpace(result.ErrorCode) ? "unknown" : result.ErrorCode;
+        MessageBox.Show(
+            this,
+            $"{result.ErrorMessage ?? "操作失败"}\n\n错误代码：{errorCode}\n详细信息已写入诊断日志，可点击窗口右下角“复制日志”发送给技术人员。",
+            title,
+            MessageBoxButton.OK,
+            icon);
+    }
+
+    private void MarkDiagnosticFailure()
+    {
+        ViewDiagnosticLogButton.Content = "查看错误日志";
+        ViewDiagnosticLogButton.SetResourceReference(StyleProperty, "DangerTextButton");
+    }
+
+    private static DiagnosticLog CreateDiagnosticLog(BuildFlavor flavor)
+    {
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "unknown";
+        var session = $"version={version}; build={flavor}; os={RuntimeInformation.OSDescription}; processArchitecture={RuntimeInformation.ProcessArchitecture}";
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CodexDeepSeekSetup",
+            "Logs");
+        try
+        {
+            return new DiagnosticLog(root, sessionDescription: session);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return new DiagnosticLog(Path.Combine(Path.GetTempPath(), "CodexDeepSeekSetup", "Logs"), sessionDescription: session);
         }
     }
 

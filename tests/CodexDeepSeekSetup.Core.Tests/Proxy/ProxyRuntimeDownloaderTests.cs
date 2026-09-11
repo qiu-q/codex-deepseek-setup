@@ -85,6 +85,25 @@ public sealed class ProxyRuntimeDownloaderTests : IDisposable
         Assert.False(File.Exists(Path.Combine(root, "..", "outside.exe")));
     }
 
+    [Fact]
+    public async Task EnsureRuntimeAsync_ReportsEveryFailedSourceForDiagnostics()
+    {
+        var archive = CreateArchive(("mihomo-windows-amd64-compatible.exe", "mihomo-binary"));
+        var options = CreateOptions(archive);
+        var handler = new RuntimeHandler(_ => throw new HttpRequestException(
+            "upstream returned 502",
+            inner: null,
+            statusCode: HttpStatusCode.BadGateway));
+
+        var result = await new ProxyRuntimeDownloader(new HttpClient(handler))
+            .EnsureRuntimeAsync(options, progress: null, default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains(options.PrimaryArchiveUri.Host, result.DiagnosticDetails, StringComparison.Ordinal);
+        Assert.Contains(options.FallbackArchiveUri.Host, result.DiagnosticDetails, StringComparison.Ordinal);
+        Assert.Contains("502", result.DiagnosticDetails, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))

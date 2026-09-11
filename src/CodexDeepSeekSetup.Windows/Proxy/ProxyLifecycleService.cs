@@ -293,7 +293,7 @@ public sealed class ProxyLifecycleService(
     }
 
     private static OperationResult<Unit> Failure<T>(OperationResult<T> result) =>
-        OperationResult<Unit>.Failure(result.ErrorCode!, result.ErrorMessage!);
+        OperationResult<Unit>.Failure(result.ErrorCode!, result.ErrorMessage!, result.DiagnosticDetails);
 
     private static void TryDelete(string? path, bool isDirectory, ICollection<string> failures)
     {

@@ -82,6 +82,19 @@
                 </Border>
             </StackPanel>
         </ScrollViewer>
-        <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="28,0"><DockPanel VerticalAlignment="Center"><Ellipse Width="8" Height="8" Fill="{StaticResource PrimaryBrush}" Margin="0,0,9,0"/><TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource SecondaryTextBrush}"/></DockPanel></Border>
+        <Border Grid.Row="3" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="28,0">
+            <Grid VerticalAlignment="Center">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Ellipse Width="8" Height="8" Fill="{StaticResource PrimaryBrush}" Margin="0,0,9,0"/>
+                <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" VerticalAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{StaticResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis" Margin="0,0,18,0"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="ViewDiagnosticLogButton" Content="查看日志" Click="ViewDiagnosticLogButton_Click"
+                            Height="32" Padding="12,0" ToolTip="查看本次运行的脱敏诊断日志"/>
+                    <Button x:Name="CopyDiagnosticLogButton" Content="复制日志" Click="CopyDiagnosticLogButton_Click"
+                            Height="32" Padding="12,0" Margin="0" ToolTip="复制脱敏日志后直接发送给技术人员"/>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

@@ -26,6 +26,7 @@ public sealed class ProxyRuntimeDownloader(HttpClient http)
 
         var archivePath = Path.Combine(options.RuntimeDirectory, options.ArchiveFileName);
         ProxyRuntimeException? lastError = null;
+        var attemptDetails = new List<string>();
         foreach (var source in new[] { options.PrimaryArchiveUri, options.FallbackArchiveUri })
         {
             try
@@ -42,6 +43,7 @@ public sealed class ProxyRuntimeDownloader(HttpClient http)
             catch (ProxyRuntimeException error)
             {
                 lastError = error;
+                attemptDetails.Add(DescribeAttempt(source, error));
                 DeleteIfPresent(archivePath);
                 DeleteIfPresent(archivePath + ".partial");
                 DeleteIfPresent(executablePath + ".partial");
@@ -49,6 +51,7 @@ public sealed class ProxyRuntimeDownloader(HttpClient http)
             catch (Exception error) when (error is HttpRequestException or IOException or InvalidDataException)
             {
                 lastError = new ProxyRuntimeException("proxy.runtime.download", "Mihomo 下载或解压失败", error);
+                attemptDetails.Add(DescribeAttempt(source, error));
                 DeleteIfPresent(archivePath);
                 DeleteIfPresent(archivePath + ".partial");
                 DeleteIfPresent(executablePath + ".partial");
@@ -57,7 +60,23 @@ public sealed class ProxyRuntimeDownloader(HttpClient http)
 
         return OperationResult<string>.Failure(
             lastError?.Code ?? "proxy.runtime.download",
-            lastError?.Message ?? "无法下载 Mihomo");
+            lastError?.Message ?? "无法下载 Mihomo",
+            string.Join(Environment.NewLine, attemptDetails));
+    }
+
+    private static string DescribeAttempt(Uri source, Exception error)
+    {
+        var endpoint = source.GetLeftPart(UriPartial.Authority) + source.AbsolutePath;
+        Exception cause = error;
+        if (error is ProxyRuntimeException && error.InnerException is Exception inner)
+        {
+            cause = inner;
+        }
+        var statusCode = (cause as HttpRequestException)?.StatusCode;
+        var status = statusCode is { } actualStatus
+            ? $" HTTP {(int)actualStatus} ({actualStatus})"
+            : string.Empty;
+        return $"source={endpoint}; exception={cause.GetType().Name};{status}; message={cause.Message}";
     }
 
     private async Task DownloadPinnedArchiveAsync(

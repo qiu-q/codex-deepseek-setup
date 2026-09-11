@@ -108,6 +108,23 @@ public sealed class SubscriptionImporterTests : IDisposable
         Assert.Contains("mislabeled-provider", await File.ReadAllTextAsync(destination));
     }
 
+    [Fact]
+    public async Task ImportAsync_PreservesSafeNetworkFailureDetailsForDiagnostics()
+    {
+        var handler = new SubscriptionHandler(_ => throw new HttpRequestException(
+            "TLS handshake failed for https://provider.example/sub?token=secret-value"));
+
+        var result = await new SubscriptionImporter(new HttpClient(handler))
+            .ImportAsync(new Uri("https://provider.example/sub?token=another-secret"), Path.Combine(root, "subscription.yaml"), default);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("proxy.subscription.network", result.ErrorCode);
+        Assert.Contains("HttpRequestException", result.DiagnosticDetails, StringComparison.Ordinal);
+        Assert.Contains("TLS handshake failed", result.DiagnosticDetails, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-value", result.DiagnosticDetails, StringComparison.Ordinal);
+        Assert.DoesNotContain("another-secret", result.DiagnosticDetails, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root))

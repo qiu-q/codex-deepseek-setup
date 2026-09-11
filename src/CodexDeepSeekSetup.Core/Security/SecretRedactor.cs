@@ -12,7 +12,9 @@ public static partial class SecretRedactor
         }
 
         var withoutBearer = BearerPattern().Replace(value, "$1[REDACTED]");
-        return DeepSeekKeyPattern().Replace(withoutBearer, "[REDACTED]");
+        var withoutKeys = DeepSeekKeyPattern().Replace(withoutBearer, "[REDACTED]");
+        var withoutQuery = UrlQueryPattern().Replace(withoutKeys, "$1?[REDACTED]");
+        return UrlFragmentPattern().Replace(withoutQuery, "$1#[REDACTED]");
     }
 
     [GeneratedRegex(@"(?i)(Authorization\s*:\s*Bearer\s+)\S+", RegexOptions.CultureInvariant)]
@@ -20,4 +22,10 @@ public static partial class SecretRedactor
 
     [GeneratedRegex(@"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}", RegexOptions.CultureInvariant)]
     private static partial Regex DeepSeekKeyPattern();
+
+    [GeneratedRegex(@"(?i)([a-z][a-z0-9+.-]*://[^\s?#]+)\?[^\s#]*", RegexOptions.CultureInvariant)]
+    private static partial Regex UrlQueryPattern();
+
+    [GeneratedRegex(@"(?i)([a-z][a-z0-9+.-]*://[^\s#]+)#[^\s]*", RegexOptions.CultureInvariant)]
+    private static partial Regex UrlFragmentPattern();
 }
